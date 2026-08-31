@@ -189,18 +189,35 @@ def generate_api_math_representation(
     messages = _build_messages(prompt, generation_level)
 
     generation_started_at = time.perf_counter()
-    completion = client.chat_completion(
-        messages=messages,
+    response_parts = []
+    last_chunk = None
+    for chunk in client.chat_completion(
+        messages,
         max_tokens=int(max_new_tokens),
+        stream=True,
         temperature=float(temperature),
-    )
+    ):
+        last_chunk = chunk
+        choices = getattr(chunk, "choices", [])
+        if not choices:
+            continue
+
+        delta = getattr(choices[0], "delta", None)
+        token = getattr(delta, "content", "") if delta is not None else ""
+        if token:
+            response_parts.append(token)
+
     finished_at = time.perf_counter()
 
-    response = completion.choices[0].message.content
-    usage = getattr(completion, "usage", None)
-    prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
-    generated_tokens = getattr(usage, "completion_tokens", None) if usage else None
+    response = "".join(response_parts).strip()
+    if not response:
+        raise RuntimeError(
+            "API model returned no text content. "
+            f"Last streamed chunk: {last_chunk!r}"
+        )
+
     generation_time = finished_at - generation_started_at
+    generated_tokens = len(response.split())
 
     metrics = {
         "model": REMOTE_MODEL_NAME,
@@ -208,7 +225,7 @@ def generate_api_math_representation(
         "response_time_s": finished_at - started_at,
         "model_ready_time_s": 0.0,
         "generation_time_s": generation_time,
-        "prompt_tokens": prompt_tokens,
+        "prompt_tokens": None,
         "generated_tokens": generated_tokens,
         "tokens_per_s": (
             generated_tokens / generation_time
