@@ -17,7 +17,6 @@ LEVEL_INSTRUCTIONS = {
     "PhD": "Use advanced mathematical machinery such as Lagrangians, Taylor series, limits, or series expansions.",
 }
 
-
 @lru_cache(maxsize=1)
 def _load_model(model_name: str = DEFAULT_MODEL_NAME):
     import torch
@@ -58,41 +57,74 @@ def _build_messages(prompt: str, generation_level: str):
             "role": "system",
             "content": (
                 "You are a mathematical representation generator, not a step-by-step "
-                "solver. Rewrite the user's math input as a different but "
-                "mathematically equivalent expression. Do not simplify the input to a "
-                "bare final value. For example, if the input is 1 + 1, do not answer "
-                "with only 2; answer with another expression equivalent to 2. Return "
-                "only one final answer in Markdown using this exact format:\n"
+                "solver. Your job is to rewrite the user's input as a different "
+                "mathematically equivalent expression. For example, 90 + 10 can be" 
+                "represented as $10 \\times 10$. Here input is equivalent to output"
+                "Think internally using this procedure: "
+                "identify the value or expression, choose an identity or "
+                "operation appropriate for the requested level, substitute the user's "
+                "input into that identity, and verify it remains equivalent. Do not "
+                "show these steps. Never return the original input unchanged. Never "
+                "return only the simplified numeric value. Return exactly one Markdown "
+                "line in this format:\n"
                 "**Final Representation:** `expression`\n"
-                "Do not include explanations, steps, boxed answers, headings, or extra "
-                f"text. {level_instruction}"
+                f"{level_instruction}"
             ),
         },
-        {
-            "role": "user",
-            "content": (
-                f"Create one {generation_level} representation equivalent to this "
-                f"input, but do not return the simplified value alone: {prompt}"
-            ),
-        },
+        # {
+        #     "role": "user",
+        #     "content": "Level: Highschool\nInput: 1 + 1",
+        # },
+        # {
+        #     "role": "assistant",
+        #     "content": "**Final Representation:** `(1 + 1) + 0`",
+        # },
+        # {
+        #     "role": "user",
+        #     "content": "Level: Undergraduate\nInput: 1 + 1",
+        # },
+        # {
+        #     "role": "assistant",
+        #     "content": "**Final Representation:** `(1 + 1)(\\sin^2\\theta + \\cos^2\\theta)`",
+        # },
+        # {
+        #     "role": "user",
+        #     "content": "Level: Masters\nInput: 1 + 1",
+        # },
+        # {
+        #     "role": "assistant",
+        #     "content": "**Final Representation:** `\\frac{\\partial}{\\partial z}\\left[z(1 + 1)\\right]`",
+        # },
+        # {
+        #     "role": "user",
+        #     "content": "Level: PhD\nInput: 1 + 1",
+        # },
+        # {
+        #     "role": "assistant",
+        #     "content": "**Final Representation:** `(1 + 1)\\sum_{n=0}^{\\infty}\\frac{0^n}{n!}`",
+        # },
+        # {
+        #     "role": "user",
+        #     "content": "Level: Undergraduate\nInput: x^2 + 2x + 1",
+        # },
+        # {
+        #     "role": "assistant",
+        #     "content": "**Final Representation:** `(x^2 + 2x + 1)(\\sin^2\\theta + \\cos^2\\theta)`",
+        # },
+        # {
+        #     "role": "user",
+        #     "content": (
+        #         f"Level: {generation_level}\n"
+        #         f"Input: {prompt}\n"
+        #         "Return only the Markdown final representation line."
+        #     ),
+        # },
     ]
 
 
 def _format_final_representation(text: str) -> str:
     text = text.strip()
-    marker = "**Final Representation:**"
-    if marker in text:
-        text = text.split(marker, 1)[1].strip()
-    elif "Final Representation:" in text:
-        text = text.split("Final Representation:", 1)[1].strip()
-    elif "final answer is:" in text.lower():
-        text = text.rsplit(":", 1)[-1].strip()
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    text = lines[-1] if lines else text
-    text = text.replace("\\boxed{", "").replace("}", "")
-    text = text.strip("`[] .")
-    return f"**Final Representation:** `{text}`" if text else ""
+    return text
 
 
 def generate_math_representation(

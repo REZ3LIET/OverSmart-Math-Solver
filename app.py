@@ -19,16 +19,16 @@ def format_inference_report(metrics):
 
     return "\n".join(
         [
-            "Inference Report",
-            f"Model: {metrics['model']}",
-            f"Response time: {metrics['response_time_s']:.2f} s",
-            f"Model ready overhead: {metrics['model_ready_time_s']:.2f} s",
-            f"Generation time: {metrics['generation_time_s']:.2f} s",
-            f"Prompt tokens: {metrics['prompt_tokens']}",
-            f"Generated tokens: {metrics['generated_tokens']}",
-            f"Throughput: {metrics['tokens_per_s']:.2f} tokens/s",
-            f"Peak process memory: {metrics['peak_rss_mb']:.1f} MB",
-            gpu_line,
+            "### Inference Report",
+            f"- **Model:** `{metrics['model']}`",
+            f"- **Response time:** {metrics['response_time_s']:.2f} s",
+            f"- **Model ready overhead:** {metrics['model_ready_time_s']:.2f} s",
+            f"- **Generation time:** {metrics['generation_time_s']:.2f} s",
+            f"- **Prompt tokens:** {metrics['prompt_tokens']}",
+            f"- **Generated tokens:** {metrics['generated_tokens']}",
+            f"- **Throughput:** {metrics['tokens_per_s']:.2f} tokens/s",
+            f"- **Peak process memory:** {metrics['peak_rss_mb']:.1f} MB",
+            f"- **{gpu_line}**",
         ]
     )
 
@@ -57,7 +57,11 @@ def generate_response(
     except Exception as exc:
         trace = traceback.format_exc()
         print(trace, flush=True)
-        return "", f"Inference failed: {type(exc).__name__}: {exc}\n\n{trace}"
+        return "", (
+            f"### Inference Failed\n\n"
+            f"**{type(exc).__name__}:** {exc}\n\n"
+            f"```text\n{trace}\n```"
+        )
 
     return response, format_inference_report(metrics)
 
@@ -102,11 +106,9 @@ with gr.Blocks(title="SLM Playground") as demo:
                 label="Output",
             )
 
-    inference_report = gr.Textbox(
+    inference_report = gr.Markdown(
         label="Inference Report",
-        placeholder="Performance metrics will appear after generation.",
-        lines=10,
-        interactive=False,
+        value="Performance metrics will appear after generation.",
     )
 
     generate_button = gr.Button(
@@ -144,7 +146,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         max_new_tokens = gr.Slider(
             minimum=32,
             maximum=2048,
-            value=128,
+            value=64,
             step=32,
             label="Max New Tokens",
         )
@@ -152,7 +154,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         temperature = gr.Slider(
             minimum=0.0,
             maximum=2.0,
-            value=0.7,
+            value=0.0,
             step=0.05,
             label="Temperature",
         )
