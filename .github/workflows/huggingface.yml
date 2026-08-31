@@ -9,8 +9,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: huggingface/hub-sync@v0.1.0
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Sync to Hugging Face
+        uses: huggingface/hub-sync@v0.1.0
         with:
           github_repo_id: ${{ github.repository }}
           huggingface_repo_id: REZ3LIET/OverSmart-Math-Solver
           hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: gradio
