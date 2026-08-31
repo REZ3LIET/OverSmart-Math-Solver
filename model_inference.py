@@ -15,7 +15,7 @@ DEFAULT_MODEL_NAME = os.getenv(
     "OSMS_MODEL_NAME",
     "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit",
 )
-REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "openai/gpt-oss-20b")
+REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "Qwen/Qwen2.5-3B-Instruct")
 
 LEVEL_INSTRUCTIONS = {
     "Highschool": "Use only basic algebra.",
@@ -79,6 +79,32 @@ def _build_messages(prompt: str, generation_level: str):
                 f"The result must be the same as: {prompt}. Think step-wise to answer.\n"
                 "Return only the final expression for fun in the format below:\n"
                 "Expression: $${latex expression}$$"
+            ),
+        },
+    ]
+
+
+def _build_api_messages(prompt: str, generation_level: str):
+    level_instruction = LEVEL_INSTRUCTIONS.get(
+        generation_level,
+        LEVEL_INSTRUCTIONS["Highschool"],
+    )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You output only visible final answers. Do not write reasoning. "
+                "Do not think step-wise in the response. Do not explain. "
+                "Return exactly one line in this format: Expression: $$...$$"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Create a different mathematically equivalent expression. "
+                f"Level instruction: {level_instruction} "
+                f"Input: {prompt} "
+                "Output only: Expression: $$latex expression$$"
             ),
         },
     ]
@@ -280,6 +306,16 @@ def _read_api_stream(stream):
     return "".join(response_parts).strip(), last_chunk
 
 
+def _api_usage_from_chunk(chunk):
+    usage = getattr(chunk, "usage", None) if chunk is not None else None
+    prompt_tokens = _usage_value(usage, "prompt_tokens")
+    completion_tokens = _usage_value(usage, "completion_tokens")
+    total_tokens = _usage_value(usage, "total_tokens")
+    completion_details = _usage_value(usage, "completion_tokens_details") or {}
+    reasoning_tokens = _detail_value(completion_details, "reasoning_tokens")
+    return prompt_tokens, completion_tokens, total_tokens, reasoning_tokens
+
+
 def generate_api_math_representation(
     prompt: str,
     generation_level: str,
@@ -294,30 +330,41 @@ def generate_api_math_representation(
         token=hf_token,
         model=REMOTE_MODEL_NAME,
     )
-    messages = _build_messages(prompt, generation_level)
+    messages = _build_api_messages(prompt, generation_level)
 
     generation_started_at = time.perf_counter()
-    api_max_tokens = max(int(max_new_tokens), 1024)
-    response, last_chunk = _collect_streamed_api_response(
-        client=client,
-        messages=messages,
-        max_tokens=api_max_tokens,
-        temperature=float(temperature),
-    )
+    requested_max_tokens = int(max_new_tokens)
+    api_attempts = [
+        max(requested_max_tokens, 1024),
+        max(requested_max_tokens, 2048),
+        max(requested_max_tokens, 4096),
+    ]
+    response = ""
+    last_chunk = None
+    attempted_tokens = []
+
+    for api_max_tokens in api_attempts:
+        attempted_tokens.append(api_max_tokens)
+        response, last_chunk = _collect_streamed_api_response(
+            client=client,
+            messages=messages,
+            max_tokens=api_max_tokens,
+            temperature=float(temperature),
+        )
+        if response:
+            break
+
     finished_at = time.perf_counter()
 
-    usage = getattr(last_chunk, "usage", None) if last_chunk is not None else None
-    prompt_tokens = _usage_value(usage, "prompt_tokens")
-    completion_tokens = _usage_value(usage, "completion_tokens")
-    total_tokens = _usage_value(usage, "total_tokens")
-    completion_details = _usage_value(usage, "completion_tokens_details") or {}
-    reasoning_tokens = _detail_value(completion_details, "reasoning_tokens")
+    prompt_tokens, completion_tokens, total_tokens, reasoning_tokens = _api_usage_from_chunk(
+        last_chunk
+    )
 
     if not response:
         raise RuntimeError(
             "API model returned no visible text content. The request appears to "
             "have been spent on hidden reasoning tokens before producing an answer. "
-            f"Requested max_tokens: {api_max_tokens}. "
+            f"Attempted max_tokens: {attempted_tokens}. "
             f"Prompt tokens: {prompt_tokens}. "
             f"Completion tokens: {completion_tokens}. "
             f"Reasoning tokens: {reasoning_tokens}. "
@@ -331,6 +378,8 @@ def generate_api_math_representation(
     metrics = {
         "model": REMOTE_MODEL_NAME,
         "mode": "api",
+        "api_attempts": len(attempted_tokens),
+        "api_max_tokens": attempted_tokens[-1],
         "response_time_s": finished_at - started_at,
         "model_ready_time_s": 0.0,
         "generation_time_s": generation_time,
