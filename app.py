@@ -75,6 +75,7 @@ def generate_response(
                 f"```text\n{trace}\n```"
             )
 
+        print(f"generated response: {response}")
         return response, format_inference_report(metrics)
 
     try:
