@@ -98,11 +98,8 @@ with gr.Blocks(title="SLM Playground") as demo:
             )
 
         with gr.Column():
-            output_text = gr.Textbox(
+            output_text = gr.Markdown(
                 label="Output",
-                placeholder="Model response...",
-                lines=10,
-                interactive=False,
             )
 
     inference_report = gr.Textbox(
@@ -147,7 +144,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         max_new_tokens = gr.Slider(
             minimum=32,
             maximum=2048,
-            value=512,
+            value=128,
             step=32,
             label="Max New Tokens",
         )

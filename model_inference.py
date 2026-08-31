@@ -10,10 +10,10 @@ DEFAULT_MODEL_NAME = os.getenv(
 )
 
 LEVEL_INSTRUCTIONS = {
-    "Highschool": "Use basic arithmetic and algebra only.",
-    "Undergraduate": "Use trigonometry and single-variable calculus.",
-    "Masters": "Use advanced trigonometry, multivariable calculus, and partial derivatives.",
-    "Graduate": "Use advanced trigonometry, multivariable calculus, and partial derivatives.",
+    "Highschool": "Use basic arithmetic or algebra only.",
+    "Undergraduate": "Use trigonometry or single-variable calculus.",
+    "Masters": "Use advanced trigonometry, multivariable calculus, or partial derivatives.",
+    "Graduate": "Use advanced trigonometry, multivariable calculus, or partial derivatives.",
     "PhD": "Use advanced mathematical machinery such as Lagrangians, Taylor series, limits, or series expansions.",
 }
 
@@ -57,18 +57,42 @@ def _build_messages(prompt: str, generation_level: str):
         {
             "role": "system",
             "content": (
-                "You rewrite a user's math input as a new mathematically equivalent "
-                "representation. Return only the transformed math expression, no "
-                "explanation, no markdown, and no prose. The result must evaluate to "
-                "the same value or describe the same mathematical object as the input. "
-                f"{level_instruction}"
+                "You are a mathematical representation generator, not a step-by-step "
+                "solver. Rewrite the user's math input as a different but "
+                "mathematically equivalent expression. Do not simplify the input to a "
+                "bare final value. For example, if the input is 1 + 1, do not answer "
+                "with only 2; answer with another expression equivalent to 2. Return "
+                "only one final answer in Markdown using this exact format:\n"
+                "**Final Representation:** `expression`\n"
+                "Do not include explanations, steps, boxed answers, headings, or extra "
+                f"text. {level_instruction}"
             ),
         },
         {
             "role": "user",
-            "content": f"Create a {generation_level} representation of: {prompt}",
+            "content": (
+                f"Create one {generation_level} representation equivalent to this "
+                f"input, but do not return the simplified value alone: {prompt}"
+            ),
         },
     ]
+
+
+def _format_final_representation(text: str) -> str:
+    text = text.strip()
+    marker = "**Final Representation:**"
+    if marker in text:
+        text = text.split(marker, 1)[1].strip()
+    elif "Final Representation:" in text:
+        text = text.split("Final Representation:", 1)[1].strip()
+    elif "final answer is:" in text.lower():
+        text = text.rsplit(":", 1)[-1].strip()
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = lines[-1] if lines else text
+    text = text.replace("\\boxed{", "").replace("}", "")
+    text = text.strip("`[] .")
+    return f"**Final Representation:** `{text}`" if text else ""
 
 
 def generate_math_representation(
@@ -86,17 +110,17 @@ def generate_math_representation(
     device = _model_input_device(model)
 
     if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
-        input_ids = tokenizer.apply_chat_template(
+        text = tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(device)
-        model_inputs = {"input_ids": input_ids}
+            tokenize=False,
+        )
     else:
         text = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
-        model_inputs = tokenizer(text, return_tensors="pt")
-        model_inputs = {key: value.to(device) for key, value in model_inputs.items()}
-        input_ids = model_inputs["input_ids"]
+
+    model_inputs = tokenizer(text, return_tensors="pt")
+    model_inputs = {key: value.to(device) for key, value in model_inputs.items()}
+    input_ids = model_inputs["input_ids"]
 
     prompt_tokens = int(input_ids.shape[-1])
     do_sample = temperature > 0
@@ -151,4 +175,5 @@ def generate_math_representation(
         "peak_rss_mb": peak_rss_mb,
         "gpu_peak_allocated_mb": gpu_peak_mb,
     }
-    return tokenizer.decode(generated_ids, skip_special_tokens=True).strip(), metrics
+    response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    return _format_final_representation(response), metrics
