@@ -66,9 +66,6 @@ def generate_response(
     return response, format_inference_report(metrics)
 
 
-# ---------------------------------------------------------
-# Example prompts
-# ---------------------------------------------------------
 EXAMPLE_PROMPTS = [
     "1 + 1",
     "x^2 + 2x + 1",
@@ -78,42 +75,33 @@ EXAMPLE_PROMPTS = [
     "partial derivative of x^2*y + sin(x*y) with respect to x",
 ]
 
-
-# ---------------------------------------------------------
-# UI
-# ---------------------------------------------------------
-with gr.Blocks(title="SLM Playground") as demo:
-
+with gr.Blocks(title="OSMS") as demo:
     gr.Markdown(
         """
-        # SLM Playground
-        Test and experiment with your language model.
+        # OverSmart Math Solver
+        For problems which require human brains.
         """
     )
 
-    # Input / Output side-by-side
-    with gr.Row():
+    input_text = gr.Textbox(
+        label="Input",
+        placeholder="Enter your prompt...",
+        lines=10,
+    )
 
-        with gr.Column():
-            input_text = gr.Textbox(
-                label="Input",
-                placeholder="Enter your prompt...",
-                lines=10,
-            )
+    output_text = gr.Markdown(
+        label="Output",
+        value="Generated Answer",
+    )
 
-        with gr.Column():
-            output_text = gr.Markdown(
-                label="Output",
-            )
+    generate_button = gr.Button(
+        "Solve",
+        variant="primary",
+    )
 
     inference_report = gr.Markdown(
         label="Inference Report",
         value="Performance metrics will appear after generation.",
-    )
-
-    generate_button = gr.Button(
-        "Generate",
-        variant="primary",
     )
 
     # -----------------------------------------------------
@@ -127,11 +115,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         label=None,
     )
 
-    # -----------------------------------------------------
-    # Configuration
-    # -----------------------------------------------------
     with gr.Accordion("Configuration", open=False):
-
         generation_level = gr.Radio(
             choices=[
                 "Highschool",
@@ -146,7 +130,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         max_new_tokens = gr.Slider(
             minimum=32,
             maximum=2048,
-            value=64,
+            value=512,
             step=32,
             label="Max New Tokens",
         )
@@ -154,7 +138,7 @@ with gr.Blocks(title="SLM Playground") as demo:
         temperature = gr.Slider(
             minimum=0.0,
             maximum=2.0,
-            value=0.0,
+            value=0.7,
             step=0.05,
             label="Temperature",
         )
@@ -164,45 +148,31 @@ with gr.Blocks(title="SLM Playground") as demo:
             value=True,
         )
 
-    # -----------------------------------------------------
-    # Events
-    # -----------------------------------------------------
+    generation_inputs = [
+        input_text,
+        generation_level,
+        use_local_model,
+        max_new_tokens,
+        temperature,
+    ]
+    generation_outputs = [
+        output_text,
+        inference_report,
+    ]
+
     generate_button.click(
         fn=generate_response,
-        inputs=[
-            input_text,
-            generation_level,
-            use_local_model,
-            max_new_tokens,
-            temperature
-        ],
-        outputs=[
-            output_text,
-            inference_report,
-        ],
+        inputs=generation_inputs,
+        outputs=generation_outputs,
     )
 
-    # Allow Enter/Ctrl+Enter style submission through the
-    # textbox's submit event as well.
     input_text.submit(
         fn=generate_response,
-        inputs=[
-            input_text,
-            generation_level,
-            use_local_model,
-            max_new_tokens,
-            temperature
-        ],
-        outputs=[
-            output_text,
-            inference_report,
-        ],
+        inputs=generation_inputs,
+        outputs=generation_outputs,
     )
 
 
-# ---------------------------------------------------------
-# Launch locally
-# ---------------------------------------------------------
 if __name__ == "__main__":
     demo.queue(max_size=8).launch(
         server_name="0.0.0.0",

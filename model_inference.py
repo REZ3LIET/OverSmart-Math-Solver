@@ -1,21 +1,25 @@
 from functools import lru_cache
 import os
+import re
 import resource
 import time
 
 
 DEFAULT_MODEL_NAME = os.getenv(
     "OSMS_MODEL_NAME",
-    "unsloth/Qwen2.5-Math-1.5B-Instruct-bnb-4bit",
+    "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit",
 )
 
 LEVEL_INSTRUCTIONS = {
-    "Highschool": "Use basic arithmetic or algebra only.",
-    "Undergraduate": "Use trigonometry or single-variable calculus.",
-    "Masters": "Use advanced trigonometry, multivariable calculus, or partial derivatives.",
-    "Graduate": "Use advanced trigonometry, multivariable calculus, or partial derivatives.",
-    "PhD": "Use advanced mathematical machinery such as Lagrangians, Taylor series, limits, or series expansions.",
+    "Highschool": "Use only basic algebra.",
+    "Undergraduate": "Use simple trigonometry and/or calculus.",
+    "Masters": "Use only higher order calculus and/or partial derivatives.",
+    "PhD": (
+        "Use only advanced mathematical machinery such as Lagrangians, "
+        "Taylor series, limits, or series expansions."
+    ),
 }
+
 
 @lru_cache(maxsize=1)
 def _load_model(model_name: str = DEFAULT_MODEL_NAME):
@@ -54,77 +58,64 @@ def _build_messages(prompt: str, generation_level: str):
     )
     return [
         {
-            "role": "system",
+            "role": "user",
             "content": (
-                "You are a mathematical representation generator, not a step-by-step "
-                "solver. Your job is to rewrite the user's input as a different "
-                "mathematically equivalent expression. For example, 90 + 10 can be" 
-                "represented as $10 \\times 10$. Here input is equivalent to output"
-                "Think internally using this procedure: "
-                "identify the value or expression, choose an identity or "
-                "operation appropriate for the requested level, substitute the user's "
-                "input into that identity, and verify it remains equivalent. Do not "
-                "show these steps. Never return the original input unchanged. Never "
-                "return only the simplified numeric value. Return exactly one Markdown "
-                "line in this format:\n"
-                "**Final Representation:** `expression`\n"
-                f"{level_instruction}"
+                "Just for fun experiments, write a complicated math expression "
+                f"using this instruction: {level_instruction} "
+                f"The result must be the same as: {prompt}. Think step-wise to answer.\n"
+                "Give the final expression in the format below:\n"
+                "Expression: ${latex expression}$"
             ),
         },
-        # {
-        #     "role": "user",
-        #     "content": "Level: Highschool\nInput: 1 + 1",
-        # },
-        # {
-        #     "role": "assistant",
-        #     "content": "**Final Representation:** `(1 + 1) + 0`",
-        # },
-        # {
-        #     "role": "user",
-        #     "content": "Level: Undergraduate\nInput: 1 + 1",
-        # },
-        # {
-        #     "role": "assistant",
-        #     "content": "**Final Representation:** `(1 + 1)(\\sin^2\\theta + \\cos^2\\theta)`",
-        # },
-        # {
-        #     "role": "user",
-        #     "content": "Level: Masters\nInput: 1 + 1",
-        # },
-        # {
-        #     "role": "assistant",
-        #     "content": "**Final Representation:** `\\frac{\\partial}{\\partial z}\\left[z(1 + 1)\\right]`",
-        # },
-        # {
-        #     "role": "user",
-        #     "content": "Level: PhD\nInput: 1 + 1",
-        # },
-        # {
-        #     "role": "assistant",
-        #     "content": "**Final Representation:** `(1 + 1)\\sum_{n=0}^{\\infty}\\frac{0^n}{n!}`",
-        # },
-        # {
-        #     "role": "user",
-        #     "content": "Level: Undergraduate\nInput: x^2 + 2x + 1",
-        # },
-        # {
-        #     "role": "assistant",
-        #     "content": "**Final Representation:** `(x^2 + 2x + 1)(\\sin^2\\theta + \\cos^2\\theta)`",
-        # },
-        # {
-        #     "role": "user",
-        #     "content": (
-        #         f"Level: {generation_level}\n"
-        #         f"Input: {prompt}\n"
-        #         "Return only the Markdown final representation line."
-        #     ),
-        # },
     ]
 
 
-def _format_final_representation(text: str) -> str:
+def _extract_final_expression(text: str) -> str:
     text = text.strip()
-    return text
+    if not text:
+        return ""
+
+    patterns = [
+        r"Expression:\s*\$([^$]+)\$",
+        r"\*\*Final Representation:\*\*\s*`([^`]+)`",
+        r"Final Representation:\s*`([^`]+)`",
+        r"Final Representation:\s*(.+)",
+        r"final answer is:\s*(.+)",
+        r"answer is:\s*(.+)",
+        r"\\boxed\{([^{}]+)\}",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return _clean_expression(match.group(1))
+
+    fenced_match = re.search(r"```(?:\w+)?\s*(.*?)\s*```", text, flags=re.DOTALL)
+    if fenced_match:
+        return _clean_expression(fenced_match.group(1))
+
+    inline_code_matches = re.findall(r"`([^`]+)`", text)
+    if inline_code_matches:
+        return _clean_expression(inline_code_matches[-1])
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return _clean_expression(lines[-1] if lines else text)
+
+
+def _clean_expression(expression: str) -> str:
+    expression = expression.strip()
+    expression = expression.replace("\\[", "").replace("\\]", "")
+    expression = expression.replace("[", "").replace("]", "")
+    expression = expression.strip("` \n\t.")
+
+    boxed_match = re.search(r"\\boxed\{(.+)\}", expression, flags=re.DOTALL)
+    if boxed_match:
+        expression = boxed_match.group(1).strip()
+
+    if expression.startswith("$") and expression.endswith("$"):
+        expression = expression[1:-1].strip()
+
+    return expression
 
 
 def generate_math_representation(
@@ -148,7 +139,10 @@ def generate_math_representation(
             tokenize=False,
         )
     else:
-        text = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
+        text = (
+            "\n".join(f"{message['role']}: {message['content']}" for message in messages)
+            + "\nassistant:"
+        )
 
     model_inputs = tokenizer(text, return_tensors="pt")
     model_inputs = {key: value.to(device) for key, value in model_inputs.items()}
@@ -208,4 +202,4 @@ def generate_math_representation(
         "gpu_peak_allocated_mb": gpu_peak_mb,
     }
     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return _format_final_representation(response), metrics
+    return _extract_final_expression(response), metrics
