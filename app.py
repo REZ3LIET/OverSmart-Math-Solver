@@ -54,6 +54,19 @@ def generate_response(
         return "", ""
 
     if not use_local_model:
+        print(
+            "OAuth token received:",
+            hf_token is not None,
+            flush=True,
+        )
+
+        if hf_token is not None:
+            print(
+                "OAuth token type:",
+                type(hf_token),
+                flush=True,
+            )
+
         token = getattr(hf_token, "token", None)
         if not token:
             return "", "### Login Required\n\nLog in with Hugging Face to use API mode."
@@ -177,7 +190,7 @@ with gr.Blocks(title="OSMS") as demo:
 
         use_local_model = gr.Checkbox(
             label="Use local ZeroGPU model",
-            value=True,
+            value=False,
         )
 
     generation_inputs = [
