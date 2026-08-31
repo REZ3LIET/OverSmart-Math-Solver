@@ -1,0 +1,19 @@
+{
+  "created_at_utc": "2026-08-31T00:37:13.735369+00:00",
+  "models": [
+    "Qwen/Qwen2.5-Math-1.5B-Instruct",
+    "unsloth/Qwen2.5-Math-1.5B-Instruct-bnb-4bit"
+  ],
+  "output_dir": "eval_runs/20260831_003713_UTC",
+  "max_new_tokens": 512,
+  "temperature": 0.0,
+  "top_p": 0.95,
+  "dtype": "bfloat16",
+  "device_map": "auto",
+  "load_in_4bit": false,
+  "load_in_8bit": false,
+  "trust_remote_code": false,
+  "gsm8k_samples": 0,
+  "limit_items": 0,
+  "allow_auth_required": false
+}
