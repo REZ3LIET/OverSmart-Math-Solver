@@ -63,60 +63,11 @@ def _build_messages(prompt: str, generation_level: str):
                 "Just for fun experiments, write a complicated math expression "
                 f"using this instruction: {level_instruction} "
                 f"The result must be the same as: {prompt}. Think step-wise to answer.\n"
-                "Give the final expression in the format below:\n"
-                "Expression: ${latex expression}$"
+                "Return only the final expression for fun in the format below:\n"
+                "Expression: $${latex expression}$$"
             ),
         },
     ]
-
-
-def _extract_final_expression(text: str) -> str:
-    text = text.strip()
-    if not text:
-        return ""
-
-    patterns = [
-        r"Expression:\s*\$([^$]+)\$",
-        r"\*\*Final Representation:\*\*\s*`([^`]+)`",
-        r"Final Representation:\s*`([^`]+)`",
-        r"Final Representation:\s*(.+)",
-        r"final answer is:\s*(.+)",
-        r"answer is:\s*(.+)",
-        r"\\boxed\{([^{}]+)\}",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-        if match:
-            return _clean_expression(match.group(1))
-
-    fenced_match = re.search(r"```(?:\w+)?\s*(.*?)\s*```", text, flags=re.DOTALL)
-    if fenced_match:
-        return _clean_expression(fenced_match.group(1))
-
-    inline_code_matches = re.findall(r"`([^`]+)`", text)
-    if inline_code_matches:
-        return _clean_expression(inline_code_matches[-1])
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return _clean_expression(lines[-1] if lines else text)
-
-
-def _clean_expression(expression: str) -> str:
-    expression = expression.strip()
-    expression = expression.replace("\\[", "").replace("\\]", "")
-    expression = expression.replace("[", "").replace("]", "")
-    expression = expression.strip("` \n\t.")
-
-    boxed_match = re.search(r"\\boxed\{(.+)\}", expression, flags=re.DOTALL)
-    if boxed_match:
-        expression = boxed_match.group(1).strip()
-
-    if expression.startswith("$") and expression.endswith("$"):
-        expression = expression[1:-1].strip()
-
-    return expression
-
 
 def generate_math_representation(
     prompt: str,
@@ -202,4 +153,4 @@ def generate_math_representation(
         "gpu_peak_allocated_mb": gpu_peak_mb,
     }
     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return _extract_final_expression(response), metrics
+    return response, metrics
