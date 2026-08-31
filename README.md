@@ -5,6 +5,7 @@ colorFrom: red
 colorTo: purple
 sdk: gradio
 app_file: app.py
+hf_oauth: true
 ---
 
 # OverSmart-Math-Solver
