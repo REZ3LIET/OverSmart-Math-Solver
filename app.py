@@ -54,19 +54,6 @@ def generate_response(
         return "", ""
 
     if not use_local_model:
-        print(
-            "OAuth token received:",
-            hf_token is not None,
-            flush=True,
-        )
-
-        if hf_token is not None:
-            print(
-                "OAuth token type:",
-                type(hf_token),
-                flush=True,
-            )
-
         token = getattr(hf_token, "token", None)
         if not token:
             return "", "### Login Required\n\nLog in with Hugging Face to use API mode."
@@ -106,6 +93,7 @@ def generate_response(
             f"```text\n{trace}\n```"
         )
 
+    print(f"generated response: {response}")
     return response, format_inference_report(metrics)
 
 
@@ -219,7 +207,4 @@ with gr.Blocks(title="OSMS") as demo:
 
 
 if __name__ == "__main__":
-    demo.queue(max_size=8).launch(
-        server_name="0.0.0.0",
-        server_port=int(os.getenv("PORT", "7860")),
-    )
+    demo.launch(ssr_mode=False)
