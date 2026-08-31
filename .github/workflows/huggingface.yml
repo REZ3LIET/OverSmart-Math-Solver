@@ -2,8 +2,7 @@ name: Sync to Hugging Face Space
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   sync:
