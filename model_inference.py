@@ -11,11 +11,8 @@ except ImportError:
     spaces = None
 
 
-DEFAULT_MODEL_NAME = os.getenv(
-    "OSMS_MODEL_NAME",
-    "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit",
-)
-REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "Qwen/Qwen2.5-3B-Instruct")
+DEFAULT_MODEL_NAME = os.getenv("OSMS_MODEL_NAME", "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit")
+REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "openai/gpt-oss-20b")
 
 LEVEL_INSTRUCTIONS = {
     "Highschool": "Use only basic algebra.",
@@ -91,20 +88,13 @@ def _build_api_messages(prompt: str, generation_level: str):
     )
     return [
         {
-            "role": "system",
-            "content": (
-                "You output only visible final answers. Do not write reasoning. "
-                "Do not think step-wise in the response. Do not explain. "
-                "Return exactly one line in this format: Expression: $$...$$"
-            ),
-        },
-        {
             "role": "user",
             "content": (
-                "Create a different mathematically equivalent expression. "
-                f"Level instruction: {level_instruction} "
-                f"Input: {prompt} "
-                "Output only: Expression: $$latex expression$$"
+                "Just for fun experiments, write a complicated math expression "
+                f"using this instruction: {level_instruction} "
+                f"The result must be the same as: {prompt}.\n"
+                "Return only the final expression for fun in the format below:\n"
+                "Expression: $${latex expression}$$"
             ),
         },
     ]
