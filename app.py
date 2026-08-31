@@ -3,12 +3,19 @@ import traceback
 
 import gradio as gr
 
-from model_inference import generate_math_representation
+from model_inference import generate_api_math_representation, generate_math_representation
 
 
 def format_inference_report(metrics):
     if not metrics:
         return ""
+
+    def format_metric(value, suffix=""):
+        if value is None:
+            return "unavailable"
+        if isinstance(value, float):
+            return f"{value:.2f}{suffix}"
+        return f"{value}{suffix}"
 
     gpu_memory = metrics["gpu_peak_allocated_mb"]
     gpu_line = (
@@ -21,13 +28,14 @@ def format_inference_report(metrics):
         [
             "### Inference Report",
             f"- **Model:** `{metrics['model']}`",
-            f"- **Response time:** {metrics['response_time_s']:.2f} s",
-            f"- **Model ready overhead:** {metrics['model_ready_time_s']:.2f} s",
-            f"- **Generation time:** {metrics['generation_time_s']:.2f} s",
-            f"- **Prompt tokens:** {metrics['prompt_tokens']}",
-            f"- **Generated tokens:** {metrics['generated_tokens']}",
-            f"- **Throughput:** {metrics['tokens_per_s']:.2f} tokens/s",
-            f"- **Peak process memory:** {metrics['peak_rss_mb']:.1f} MB",
+            f"- **Mode:** {metrics['mode']}",
+            f"- **Response time:** {format_metric(metrics['response_time_s'], ' s')}",
+            f"- **Model ready overhead:** {format_metric(metrics['model_ready_time_s'], ' s')}",
+            f"- **Generation time:** {format_metric(metrics['generation_time_s'], ' s')}",
+            f"- **Prompt tokens:** {format_metric(metrics['prompt_tokens'])}",
+            f"- **Generated tokens:** {format_metric(metrics['generated_tokens'])}",
+            f"- **Throughput:** {format_metric(metrics['tokens_per_s'], ' tokens/s')}",
+            f"- **Peak process memory:** {format_metric(metrics['peak_rss_mb'], ' MB')}",
             f"- **{gpu_line}**",
         ]
     )
@@ -38,14 +46,36 @@ def generate_response(
     generation_level,
     use_local_model,
     max_new_tokens,
-    temperature
+    temperature,
+    hf_token: gr.OAuthToken = None,
 ):
     prompt = prompt or ""
     if not prompt.strip():
         return "", ""
 
     if not use_local_model:
-        return "Enable 'Use Local Model' to generate with the Hugging Face model.", ""
+        token = getattr(hf_token, "token", None)
+        if not token:
+            return "", "### Login Required\n\nLog in with Hugging Face to use API mode."
+
+        try:
+            response, metrics = generate_api_math_representation(
+                prompt=prompt,
+                generation_level=generation_level,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                hf_token=token,
+            )
+        except Exception as exc:
+            trace = traceback.format_exc()
+            print(trace, flush=True)
+            return "", (
+                f"### Inference Failed\n\n"
+                f"**{type(exc).__name__}:** {exc}\n\n"
+                f"```text\n{trace}\n```"
+            )
+
+        return response, format_inference_report(metrics)
 
     try:
         response, metrics = generate_math_representation(
@@ -76,6 +106,8 @@ EXAMPLE_PROMPTS = [
 ]
 
 with gr.Blocks(title="OSMS") as demo:
+    gr.LoginButton()
+
     gr.Markdown(
         """
         # OverSmart Math Solver
@@ -144,7 +176,7 @@ with gr.Blocks(title="OSMS") as demo:
         )
 
         use_local_model = gr.Checkbox(
-            label="Use Local Model",
+            label="Use local ZeroGPU model",
             value=True,
         )
 

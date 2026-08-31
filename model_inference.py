@@ -5,10 +5,17 @@ import resource
 import time
 
 
+try:
+    import spaces
+except ImportError:
+    spaces = None
+
+
 DEFAULT_MODEL_NAME = os.getenv(
     "OSMS_MODEL_NAME",
     "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit",
 )
+REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "openai/gpt-oss-20b")
 
 LEVEL_INSTRUCTIONS = {
     "Highschool": "Use only basic algebra.",
@@ -19,6 +26,13 @@ LEVEL_INSTRUCTIONS = {
         "Taylor series, limits, or series expansions."
     ),
 }
+
+
+def _gpu(fn):
+    """Capability for non-hf runs"""
+    if spaces is None:
+        return fn
+    return spaces.GPU(fn)
 
 
 @lru_cache(maxsize=1)
@@ -69,6 +83,56 @@ def _build_messages(prompt: str, generation_level: str):
         },
     ]
 
+
+def _extract_final_expression(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+
+    patterns = [
+        r"Expression:\s*\${1,2}(.+?)\${1,2}",
+        r"\*\*Final Representation:\*\*\s*`([^`]+)`",
+        r"Final Representation:\s*`([^`]+)`",
+        r"Final Representation:\s*(.+)",
+        r"final answer is:\s*(.+)",
+        r"answer is:\s*(.+)",
+        r"\\boxed\{([^{}]+)\}",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return _clean_expression(match.group(1))
+
+    fenced_match = re.search(r"```(?:\w+)?\s*(.*?)\s*```", text, flags=re.DOTALL)
+    if fenced_match:
+        return _clean_expression(fenced_match.group(1))
+
+    inline_code_matches = re.findall(r"`([^`]+)`", text)
+    if inline_code_matches:
+        return _clean_expression(inline_code_matches[-1])
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return _clean_expression(lines[-1] if lines else text)
+
+
+def _clean_expression(expression: str) -> str:
+    expression = expression.strip()
+    expression = expression.replace("\\[", "").replace("\\]", "")
+    expression = expression.replace("[", "").replace("]", "")
+    expression = expression.strip("` \n\t.")
+
+    boxed_match = re.search(r"\\boxed\{(.+)\}", expression, flags=re.DOTALL)
+    if boxed_match:
+        expression = boxed_match.group(1).strip()
+
+    if expression.startswith("$") and expression.endswith("$"):
+        expression = expression[1:-1].strip()
+
+    return expression
+
+
+@_gpu
 def generate_math_representation(
     prompt: str,
     generation_level: str,
@@ -143,6 +207,7 @@ def generate_math_representation(
 
     metrics = {
         "model": DEFAULT_MODEL_NAME,
+        "mode": "local",
         "response_time_s": response_time,
         "model_ready_time_s": load_ready_at - started_at,
         "generation_time_s": generation_time,
@@ -153,4 +218,53 @@ def generate_math_representation(
         "gpu_peak_allocated_mb": gpu_peak_mb,
     }
     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return response, metrics
+    return _extract_final_expression(response), metrics
+
+
+def generate_api_math_representation(
+    prompt: str,
+    generation_level: str,
+    max_new_tokens: int,
+    temperature: float,
+    hf_token: str,
+) -> tuple[str, dict[str, float | int | str | None]]:
+    from huggingface_hub import InferenceClient
+
+    started_at = time.perf_counter()
+    client = InferenceClient(
+        token=hf_token,
+        model=REMOTE_MODEL_NAME,
+    )
+    messages = _build_messages(prompt, generation_level)
+
+    generation_started_at = time.perf_counter()
+    completion = client.chat_completion(
+        messages=messages,
+        max_tokens=int(max_new_tokens),
+        temperature=float(temperature),
+    )
+    finished_at = time.perf_counter()
+
+    response = completion.choices[0].message.content
+    usage = getattr(completion, "usage", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
+    generated_tokens = getattr(usage, "completion_tokens", None) if usage else None
+    generation_time = finished_at - generation_started_at
+
+    metrics = {
+        "model": REMOTE_MODEL_NAME,
+        "mode": "api",
+        "response_time_s": finished_at - started_at,
+        "model_ready_time_s": 0.0,
+        "generation_time_s": generation_time,
+        "prompt_tokens": prompt_tokens,
+        "generated_tokens": generated_tokens,
+        "tokens_per_s": (
+            generated_tokens / generation_time
+            if generated_tokens is not None and generation_time
+            else None
+        ),
+        "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
+        "gpu_peak_allocated_mb": None,
+    }
+    return _extract_final_expression(response), metrics

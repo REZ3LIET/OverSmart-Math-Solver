@@ -1,5 +1,9 @@
-gradio
-torch
-transformers
-accelerate
-bitsandbytes
+accelerate==1.14.0
+bitsandbytes==0.50.2
+gradio==6.26.0
+gradio-client==2.6.1
+huggingface-hub==1.29.0
+spaces==0.51.2
+torch==2.13.0
+tqdm==4.70.0
+transformers==5.16.1
