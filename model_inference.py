@@ -83,6 +83,63 @@ def _build_messages(prompt: str, generation_level: str):
         },
     ]
 
+
+def _extract_final_expression(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return ""
+
+    patterns = [
+        r"Expression:\s*\${1,2}(.+?)\${1,2}",
+        r"\*\*Final Representation:\*\*\s*`([^`]+)`",
+        r"Final Representation:\s*`([^`]+)`",
+        r"Final Representation:\s*(.+)",
+        r"final answer is:\s*(.+)",
+        r"answer is:\s*(.+)",
+        r"\\boxed\{([^{}]+)\}",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return _clean_expression(match.group(1))
+
+    fenced_match = re.search(r"```(?:\w+)?\s*(.*?)\s*```", text, flags=re.DOTALL)
+    if fenced_match:
+        return _clean_expression(fenced_match.group(1))
+
+    inline_code_matches = re.findall(r"`([^`]+)`", text)
+    if inline_code_matches:
+        return _clean_expression(inline_code_matches[-1])
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return _clean_expression(lines[-1] if lines else text)
+
+
+def _to_display_math(expression: str) -> str:
+    expression = expression.strip()
+    if not expression:
+        return ""
+    if expression.startswith("$$") and expression.endswith("$$"):
+        return expression
+    return f"$${expression}$$"
+
+
+def _clean_expression(expression: str) -> str:
+    expression = expression.strip()
+    expression = expression.replace("\\[", "").replace("\\]", "")
+    expression = expression.replace("[", "").replace("]", "")
+    expression = expression.strip("` \n\t.")
+
+    boxed_match = re.search(r"\\boxed\{(.+)\}", expression, flags=re.DOTALL)
+    if boxed_match:
+        expression = boxed_match.group(1).strip()
+
+    if expression.startswith("$") and expression.endswith("$"):
+        expression = expression[1:-1].strip()
+
+    return expression
+
+
 @_gpu
 def generate_math_representation(
     prompt: str,
@@ -169,7 +226,58 @@ def generate_math_representation(
         "gpu_peak_allocated_mb": gpu_peak_mb,
     }
     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    return response, metrics
+    return _to_display_math(_extract_final_expression(response)), metrics
+
+
+def _usage_value(usage, name: str):
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        return usage.get(name)
+    return getattr(usage, name, None)
+
+
+def _detail_value(details, name: str):
+    if details is None:
+        return None
+    if isinstance(details, dict):
+        return details.get(name)
+    return getattr(details, name, None)
+
+
+def _collect_streamed_api_response(client, messages, max_tokens: int, temperature: float):
+    stream_kwargs = {
+        "max_tokens": max_tokens,
+        "stream": True,
+        "temperature": temperature,
+    }
+    try:
+        return _read_api_stream(
+            client.chat_completion(
+                messages,
+                **stream_kwargs,
+                extra_body={"reasoning_effort": "low"},
+            )
+        )
+    except TypeError:
+        return _read_api_stream(client.chat_completion(messages, **stream_kwargs))
+
+
+def _read_api_stream(stream):
+    response_parts = []
+    last_chunk = None
+    for chunk in stream:
+        last_chunk = chunk
+        choices = getattr(chunk, "choices", [])
+        if not choices:
+            continue
+
+        delta = getattr(choices[0], "delta", None)
+        token = getattr(delta, "content", "") if delta is not None else ""
+        if token:
+            response_parts.append(token)
+
+    return "".join(response_parts).strip(), last_chunk
 
 
 def generate_api_math_representation(
@@ -189,35 +297,36 @@ def generate_api_math_representation(
     messages = _build_messages(prompt, generation_level)
 
     generation_started_at = time.perf_counter()
-    response_parts = []
-    last_chunk = None
-    for chunk in client.chat_completion(
-        messages,
-        max_tokens=int(max_new_tokens),
-        stream=True,
+    api_max_tokens = max(int(max_new_tokens), 1024)
+    response, last_chunk = _collect_streamed_api_response(
+        client=client,
+        messages=messages,
+        max_tokens=api_max_tokens,
         temperature=float(temperature),
-    ):
-        last_chunk = chunk
-        choices = getattr(chunk, "choices", [])
-        if not choices:
-            continue
-
-        delta = getattr(choices[0], "delta", None)
-        token = getattr(delta, "content", "") if delta is not None else ""
-        if token:
-            response_parts.append(token)
-
+    )
     finished_at = time.perf_counter()
 
-    response = "".join(response_parts).strip()
+    usage = getattr(last_chunk, "usage", None) if last_chunk is not None else None
+    prompt_tokens = _usage_value(usage, "prompt_tokens")
+    completion_tokens = _usage_value(usage, "completion_tokens")
+    total_tokens = _usage_value(usage, "total_tokens")
+    completion_details = _usage_value(usage, "completion_tokens_details") or {}
+    reasoning_tokens = _detail_value(completion_details, "reasoning_tokens")
+
     if not response:
         raise RuntimeError(
-            "API model returned no text content. "
+            "API model returned no visible text content. The request appears to "
+            "have been spent on hidden reasoning tokens before producing an answer. "
+            f"Requested max_tokens: {api_max_tokens}. "
+            f"Prompt tokens: {prompt_tokens}. "
+            f"Completion tokens: {completion_tokens}. "
+            f"Reasoning tokens: {reasoning_tokens}. "
+            f"Total tokens: {total_tokens}. "
             f"Last streamed chunk: {last_chunk!r}"
         )
 
     generation_time = finished_at - generation_started_at
-    generated_tokens = len(response.split())
+    generated_tokens = completion_tokens or len(response.split())
 
     metrics = {
         "model": REMOTE_MODEL_NAME,
@@ -225,8 +334,9 @@ def generate_api_math_representation(
         "response_time_s": finished_at - started_at,
         "model_ready_time_s": 0.0,
         "generation_time_s": generation_time,
-        "prompt_tokens": None,
+        "prompt_tokens": prompt_tokens,
         "generated_tokens": generated_tokens,
+        "reasoning_tokens": reasoning_tokens,
         "tokens_per_s": (
             generated_tokens / generation_time
             if generated_tokens is not None and generation_time
@@ -235,4 +345,4 @@ def generate_api_math_representation(
         "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024,
         "gpu_peak_allocated_mb": None,
     }
-    return response, metrics
+    return _to_display_math(_extract_final_expression(response)), metrics

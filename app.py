@@ -34,6 +34,7 @@ def format_inference_report(metrics):
             f"- **Generation time:** {format_metric(metrics['generation_time_s'], ' s')}",
             f"- **Prompt tokens:** {format_metric(metrics['prompt_tokens'])}",
             f"- **Generated tokens:** {format_metric(metrics['generated_tokens'])}",
+            f"- **Reasoning tokens:** {format_metric(metrics.get('reasoning_tokens'))}",
             f"- **Throughput:** {format_metric(metrics['tokens_per_s'], ' tokens/s')}",
             f"- **Peak process memory:** {format_metric(metrics['peak_rss_mb'], ' MB')}",
             f"- **{gpu_line}**",
