@@ -15,4 +15,4 @@ license: apache-2.0
 # OverSmart-Math-Solver
 OSMS: OverSmart Math Solver
 
-*Note: Codes are generated with help of Codex and designed by REZ3LIET*
+*Note: Codes are generated with help of Codex and designed by REZ3LIET!*
