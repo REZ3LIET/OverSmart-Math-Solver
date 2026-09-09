@@ -3,7 +3,6 @@ name: Sync to Hugging Face Space
 on:
   push:
     branches: [main]
-  pull_request:
 
 jobs:
   test:
@@ -28,8 +27,9 @@ jobs:
         run: pytest
 
   sync:
+    needs: test
     runs-on: ubuntu-latest
-
+  
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
