@@ -67,14 +67,36 @@ def generate_response(
                 temperature=temperature,
                 hf_token=token,
             )
-        except Exception as exc:
-            trace = traceback.format_exc()
-            print(trace, flush=True)
-            return "", (
-                f"### Inference Failed\n\n"
-                f"**{type(exc).__name__}:** {exc}\n\n"
-                f"```text\n{trace}\n```"
+        except Exception as remote_exc:
+            remote_trace = traceback.format_exc()
+            print("Remote inference failed; trying the local model.", flush=True)
+            print(remote_trace, flush=True)
+
+            try:
+                response, metrics = generate_math_representation(
+                    prompt=prompt,
+                    generation_level=generation_level,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                )
+            except Exception as local_exc:
+                local_trace = traceback.format_exc()
+                print("Local fallback inference failed.", flush=True)
+                print(local_trace, flush=True)
+                return "", (
+                    "### Inference Failed\n\n"
+                    "Both the remote model and the local fallback failed.\n\n"
+                    f"- **Remote:** {type(remote_exc).__name__}: {remote_exc}\n"
+                    f"- **Local:** {type(local_exc).__name__}: {local_exc}"
+                )
+
+            print(f"generated local fallback response: {response}")
+            fallback_notice = (
+                "### Local Fallback Used\n\n"
+                f"The remote model failed with `{type(remote_exc).__name__}`, "
+                "so the request was completed by the local model.\n\n"
             )
+            return response, fallback_notice + format_inference_report(metrics)
 
         print(f"generated response: {response}")
         return response, format_inference_report(metrics)
