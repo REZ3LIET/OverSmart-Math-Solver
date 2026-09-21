@@ -149,6 +149,11 @@ activemq-data/
 
 # Environments
 .env
+
+# Local recovery credentials (never commit these)
+bash/*_ed25519
+bash/*_ed25519.pub
+bash/*_ed25519.password
 .envrc
 .venv
 env/

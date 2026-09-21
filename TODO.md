@@ -1,9 +1,6 @@
 # Recovery TODO
 
-- Write the remote recovery/setup script invoked by `bash/external_watcher.sh`.
-  It should clone or update the app, create or reuse the virtual environment,
-  install dependencies, apply the required machine modifications, and start the
-  app. It must be safe to run repeatedly.
+- Restore or adapt `bash/setup.sh.bk` when the failure-counting test is complete.
 - Optimize recovery time: use a shallow clone, pin/cache dependencies where
   possible, start remote inference first, and avoid blocking app startup on the
   local model download.

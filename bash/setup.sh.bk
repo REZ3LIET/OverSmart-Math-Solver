@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DEPLOY_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/REZ3LIET/OverSmart-Math-Solver.git}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+DEPLOY_DIR="${DEPLOY_DIR:-$HOME/OverSmart-Math-Solver}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+APP_HOST="${APP_HOST:-127.0.0.1}"
+APP_PORT="${APP_PORT:-7860}"
+
+log() {
+    printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+command -v git >/dev/null || {
+    log "git is required but was not found."
+    exit 1
+}
+
+command -v "$PYTHON_BIN" >/dev/null || {
+    log "$PYTHON_BIN is required but was not found."
+    exit 1
+}
+
+if [[ -d "$DEPLOY_DIR/.git" ]]; then
+    log "Updating existing checkout in $DEPLOY_DIR."
+    git -C "$DEPLOY_DIR" fetch --depth 1 origin "$DEPLOY_BRANCH"
+    git -C "$DEPLOY_DIR" checkout -B "$DEPLOY_BRANCH" FETCH_HEAD
+elif [[ -e "$DEPLOY_DIR" ]]; then
+    log "$DEPLOY_DIR exists but is not a Git checkout; refusing to overwrite it."
+    exit 1
+else
+    log "Cloning application into $DEPLOY_DIR."
+    git clone --depth 1 --branch "$DEPLOY_BRANCH" "$DEPLOY_REPO_URL" "$DEPLOY_DIR"
+fi
+
+cd "$DEPLOY_DIR"
+
+if [[ ! -x .venv/bin/python ]]; then
+    log "Creating Python virtual environment."
+    "$PYTHON_BIN" -m venv .venv
+fi
+
+requirements_hash="$(sha256sum requirements.txt | awk '{print $1}')"
+requirements_stamp=".venv/.requirements.sha256"
+installed_hash=""
+if [[ -r "$requirements_stamp" ]]; then
+    installed_hash="$(<"$requirements_stamp")"
+fi
+
+if [[ "$requirements_hash" != "$installed_hash" ]]; then
+    log "Installing application dependencies."
+    .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+    printf '%s\n' "$requirements_hash" > "$requirements_stamp"
+else
+    log "Dependencies are already current."
+fi
+
+runtime_dir="$DEPLOY_DIR/.runtime"
+pid_file="$runtime_dir/app.pid"
+log_file="$runtime_dir/app.log"
+mkdir -p "$runtime_dir"
+
+if [[ -r "$pid_file" ]]; then
+    previous_pid="$(<"$pid_file")"
+    if [[ "$previous_pid" =~ ^[0-9]+$ ]] && kill -0 "$previous_pid" 2>/dev/null; then
+        log "Stopping previous app process $previous_pid."
+        kill "$previous_pid"
+        for _ in {1..20}; do
+            if ! kill -0 "$previous_pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.25
+        done
+    fi
+fi
+
+log "Starting application on $APP_HOST:$APP_PORT."
+nohup env \
+    GRADIO_SERVER_NAME="$APP_HOST" \
+    GRADIO_SERVER_PORT="$APP_PORT" \
+    .venv/bin/python app.py \
+    > "$log_file" 2>&1 < /dev/null &
+app_pid=$!
+printf '%s\n' "$app_pid" > "$pid_file"
+
+for _ in {1..60}; do
+    if curl --fail --silent --max-time 1 \
+        "http://$APP_HOST:$APP_PORT/" >/dev/null 2>&1
+    then
+        log "Application is healthy (PID $app_pid)."
+        exit 0
+    fi
+
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        log "Application exited during startup. Recent log output:"
+        tail -n 40 "$log_file" >&2 || true
+        exit 1
+    fi
+
+    sleep 0.5
+done
+
+log "Application did not become healthy within 30 seconds."
+tail -n 40 "$log_file" >&2 || true
+exit 1
