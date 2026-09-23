@@ -11,6 +11,7 @@ REPO_BRANCH="${REPO_BRANCH:-main}"
 APP_DIR="${APP_DIR:-$HOME/OverSmart-Math-Solver}"
 APP_HOST="${APP_HOST:-127.0.0.1}"
 APP_PORT="${APP_PORT:-8015}"
+APP_START_TIMEOUT="${APP_START_TIMEOUT:-180}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REBUILD_REPO="${FORCE_REBUILD_REPO:-false}"
 
@@ -34,17 +35,19 @@ stop_recorded_app() {
     local pid_file="$APP_DIR/.runtime/app.pid"
     local old_pid
 
-    [[ -r "$pid_file" ]] || return
+    [[ -r "$pid_file" ]] || return 0
     old_pid="$(<"$pid_file")"
-    [[ "$old_pid" =~ ^[0-9]+$ ]] || return
-    kill -0 "$old_pid" 2>/dev/null || return
+    [[ "$old_pid" =~ ^[0-9]+$ ]] || return 0
+    kill -0 "$old_pid" 2>/dev/null || return 0
 
     log "Stopping previous app process $old_pid."
     kill "$old_pid"
     for _ in {1..20}; do
-        kill -0 "$old_pid" 2>/dev/null || return
+        kill -0 "$old_pid" 2>/dev/null || return 0
         sleep 0.25
     done
+
+    return 0
 }
 
 # Install the small OS-level prerequisites on Ubuntu/Debian. Already-installed
@@ -74,6 +77,7 @@ if [[ "$FORCE_REBUILD_REPO" == true ]]; then
     # Restrict recursive deletion to an application directory below HOME.
     if [[ -z "$APP_DIR" || "$APP_DIR" == "$HOME" || "$APP_DIR" != "$HOME/"* ]]; then
         log "Refusing unsafe application directory: $APP_DIR"
+        mark_failed
         exit 1
     fi
     stop_recorded_app
@@ -129,8 +133,9 @@ nohup env \
 app_pid=$!
 printf '%s\n' "$app_pid" > "$pid_file"
 
-# Do not report successful recovery until Gradio answers on port 8015.
-for _ in {1..60}; do
+# Cold imports can be slow on a fresh LXC. Do not report successful recovery
+# until Gradio answers, but allow up to APP_START_TIMEOUT seconds.
+for (( elapsed = 0; elapsed < APP_START_TIMEOUT; elapsed++ )); do
     if curl --fail --silent --max-time 1 \
         "http://$APP_HOST:$APP_PORT/" >/dev/null
     then
@@ -143,12 +148,14 @@ for _ in {1..60}; do
     if ! kill -0 "$app_pid" 2>/dev/null; then
         log "Application exited during startup."
         tail -n 40 "$log_file" >&2 || true
+        mark_failed
         exit 1
     fi
 
-    sleep 0.5
+    sleep 1
 done
 
-log "Application did not become healthy within 30 seconds."
+log "Application did not become healthy within $APP_START_TIMEOUT seconds."
 tail -n 40 "$log_file" >&2 || true
+mark_failed
 exit 1

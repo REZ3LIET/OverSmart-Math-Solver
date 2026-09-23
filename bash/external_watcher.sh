@@ -148,6 +148,9 @@ while true; do
     log "Remote status: ${remote_status:-missing}; health: ${health_signal:-missing}"
 
     if (( health_result == 0 )); then
+        remote "$working_key" \
+            'mkdir -p "$HOME/.check" && printf "healthy\n" > "$HOME/.check/status"' \
+            >/dev/null 2>&1 || true
         log "Application is healthy."
     else
         # SSH itself uses exit code 255 when the connection disappears.
