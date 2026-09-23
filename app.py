@@ -11,6 +11,7 @@ from model_inference import generate_api_math_representation, generate_math_repr
 HF_OAUTH_ENABLED = bool(os.getenv("SPACE_ID")) or os.getenv(
     "ENABLE_HF_OAUTH", ""
 ).lower() in {"1", "true", "yes"}
+SERVER_HF_TOKEN = os.getenv("HF_TOKEN")
 
 
 def format_inference_report(metrics):
@@ -62,12 +63,17 @@ def generate_response(
         return "", ""
 
     if not use_local_model:
-        token = getattr(hf_token, "token", None) or os.getenv("HF_TOKEN")
+        token = getattr(hf_token, "token", None) or SERVER_HF_TOKEN
         if not token:
-            return "", (
-                "### Hugging Face Token Required\n\n"
-                "Log in on Hugging Face Spaces, set `HF_TOKEN` on the server, "
-                "or select the local model."
+            # Standalone deployments do not have Hugging Face OAuth. Fall back
+            # locally instead of preventing the user from running the app.
+            return generate_response(
+                prompt,
+                generation_level,
+                True,
+                max_new_tokens,
+                temperature,
+                hf_token,
             )
 
         try:
@@ -214,7 +220,7 @@ with gr.Blocks(title="OSMS") as demo:
 
         use_local_model = gr.Checkbox(
             label="Use local ZeroGPU model",
-            value=False,
+            value=not HF_OAUTH_ENABLED and not bool(SERVER_HF_TOKEN),
         )
 
     generation_inputs = [
