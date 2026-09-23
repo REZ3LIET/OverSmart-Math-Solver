@@ -56,6 +56,7 @@ def generate_response(
     use_local_model,
     max_new_tokens,
     temperature,
+    hf_access_token="",
     hf_token: gr.OAuthToken = None,
 ):
     prompt = prompt or ""
@@ -63,7 +64,11 @@ def generate_response(
         return "", ""
 
     if not use_local_model:
-        token = getattr(hf_token, "token", None) or SERVER_HF_TOKEN
+        token = (
+            getattr(hf_token, "token", None)
+            or (hf_access_token or "").strip()
+            or SERVER_HF_TOKEN
+        )
         if not token:
             # Standalone deployments do not have Hugging Face OAuth. Fall back
             # locally instead of preventing the user from running the app.
@@ -73,6 +78,7 @@ def generate_response(
                 True,
                 max_new_tokens,
                 temperature,
+                hf_access_token,
                 hf_token,
             )
 
@@ -150,6 +156,13 @@ EXAMPLE_PROMPTS = [
 with gr.Blocks(title="OSMS") as demo:
     if HF_OAUTH_ENABLED:
         gr.LoginButton()
+
+    hf_access_token = gr.Textbox(
+        label="Hugging Face access token",
+        placeholder="hf_...",
+        type="password",
+        visible=not HF_OAUTH_ENABLED,
+    )
 
     gr.Markdown(
         """
@@ -229,6 +242,7 @@ with gr.Blocks(title="OSMS") as demo:
         use_local_model,
         max_new_tokens,
         temperature,
+        hf_access_token,
     ]
     generation_outputs = [
         output_text,

@@ -98,6 +98,7 @@ else
 fi
 
 cd "$APP_DIR"
+log "Using repository commit $(git rev-parse --short HEAD)."
 
 # Reuse the environment after the first setup. Reinstall only when the
 # requirements file changes.
