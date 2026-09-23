@@ -1,6 +1,5 @@
 # Recovery TODO
 
-- Restore or adapt `bash/setup.sh.bk` when the failure-counting test is complete.
 - Optimize recovery time: use a shallow clone, pin/cache dependencies where
   possible, start remote inference first, and avoid blocking app startup on the
   local model download.

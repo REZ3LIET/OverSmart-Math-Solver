@@ -1,9 +1,9 @@
 # External recovery watcher
 
 The watcher runs on a separate machine. Because the application has no public
-HTTP port, it connects over SSH and reads a health signal from the LXC. If the
-signal is unhealthy, it sends the configured recovery script to the LXC and
-runs it with Bash.
+HTTP port, it connects over SSH and checks Gradio at `127.0.0.1:8015` from
+inside the LXC. If the check fails, it sends the configured recovery script to
+the LXC and runs it with Bash.
 
 ## Configuration
 
@@ -26,53 +26,27 @@ BOOTSTRAP_SSH_IDENTITY_FILE=/absolute/path/to/student-admin_key \
   ./bash/external_watcher.sh
 ```
 
-Run `./bash/external_watcher.sh --help` for all available settings.
-
 ## Recovery setup script
 
 `bash/setup.sh` is streamed to the LXC when the application health check fails.
-For the current test, it creates `$HOME/.check` on the remote machine and
-increments the integer stored in `$HOME/.check/count` for every detected
-failure. It then changes `$HOME/.check/status` to `healthy` to simulate a
-successful recovery. To inspect the state on the LXC:
+It:
 
-```bash
-cat ~/.check/status
-cat ~/.check/count
+1. Clones the repository on first setup or updates the existing checkout.
+2. Creates or reuses `.venv`.
+3. Installs dependencies only when `requirements.txt` changes.
+4. Stops the previous recorded app process.
+5. Starts Gradio on `127.0.0.1:8015` with `nohup`.
+6. Waits up to 30 seconds for an HTTP response.
+
+Application output and the PID are stored under:
+
+```text
+$HOME/OverSmart-Math-Solver/.runtime/
 ```
 
-The previous application deployment implementation is preserved as
-`bash/setup.sh.bk` for later use.
-
-## Smoke-testing health signals
-
-The watcher reads `$HOME/.check/status` on the remote machine and logs its
-contents as `Remote health signal`. Only the exact value `healthy` produces a
-successful health check. A missing file or any other value triggers the current
-recovery script.
-
-From an interactive remote SSH session, simulate a healthy application with:
-
-```bash
-mkdir -p ~/.check
-printf 'healthy\n' > ~/.check/status
-```
-
-Simulate an unhealthy or not-yet-installed application with:
-
-```bash
-printf 'app_not_setup\n' > ~/.check/status
-```
-
-Inspect the current signal and failure count with:
-
-```bash
-cat ~/.check/status
-cat ~/.check/count
-```
-
-This is a pull-based signal: the remote machine maintains the state file and
-the external watcher reads it over SSH every `CHECK_INTERVAL` seconds.
+Setup progress is also recorded as `recovering`, `failed`, or `healthy` in
+`$HOME/.check/status`. The watcher uses the actual HTTP response—not this file—
+as its health decision. `bash/setup.sh.bk` is retained only as an earlier draft.
 
 ## First-contact SSH key update
 
@@ -150,3 +124,5 @@ ssh -i /root/.ssh/osms-recovery/student-admin_paffenroth-23.dyn.wpi.edu_ed25519 
 - The watcher key is installed and verified before the previous login key is
   commented. If the update fails, the watcher retains the working key.
 - The watcher continues retrying SSH until the LXC becomes reachable.
+- The LXC must provide `bash`, `git`, `python3` with venv support, `curl`, and
+  `sha256sum`.

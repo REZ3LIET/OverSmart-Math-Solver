@@ -231,4 +231,8 @@ with gr.Blocks(title="OSMS") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(ssr_mode=False)
+    demo.launch(
+        server_name=os.getenv("GRADIO_SERVER_NAME", "127.0.0.1"),
+        server_port=int(os.getenv("GRADIO_SERVER_PORT", "8015")),
+        ssr_mode=False,
+    )
