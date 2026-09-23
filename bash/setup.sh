@@ -98,7 +98,8 @@ else
 fi
 
 cd "$APP_DIR"
-log "Using repository commit $(git rev-parse --short HEAD)."
+deployed_commit="$(git rev-parse HEAD)"
+log "Using repository commit ${deployed_commit:0:7}."
 
 # Reuse the environment after the first setup. Reinstall only when the
 # requirements file changes.
@@ -140,6 +141,7 @@ for (( elapsed = 0; elapsed < APP_START_TIMEOUT; elapsed++ )); do
     if curl --fail --silent --max-time 1 \
         "http://$APP_HOST:$APP_PORT/" >/dev/null
     then
+        printf '%s\n' "$deployed_commit" > "$APP_DIR/.runtime/app.commit"
         printf 'healthy\n' > "$STATE_DIR/status"
         trap - ERR
         log "Application is healthy (PID $app_pid)."

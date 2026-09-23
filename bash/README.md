@@ -143,6 +143,12 @@ ssh -i /root/.ssh/osms-recovery/student-admin_paffenroth-23.dyn.wpi.edu_ed25519 
 - The watcher continues retrying SSH until the LXC becomes reachable.
 - System package installation requires root or passwordless `sudo` on the LXC.
 - Normal health checks run every `CHECK_INTERVAL` (two seconds by default).
+- A slow Solve request reports `busy` when Gradio's HTTP check times out but
+  the recorded application PID is still alive. Busy applications are never
+  restarted merely because inference is taking time.
+- Every `DEPLOY_CHECK_INTERVAL` (30 seconds by default), a healthy app compares
+  its successfully started commit with GitHub `main`. A new commit triggers one
+  setup run, restart, and updated `.runtime/app.commit` marker.
 - While setup is running, the watcher checks its progress every
   `SETUP_CHECK_INTERVAL` (15 seconds by default) and never starts an overlapping
   setup. After setup succeeds or fails, two-second health checks resume.
