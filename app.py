@@ -6,6 +6,13 @@ import gradio as gr
 from model_inference import generate_api_math_representation, generate_math_representation
 
 
+# Hugging Face Spaces configures OAuth for us. A standalone deployment does
+# not, so enabling LoginButton there would make Gradio abort during startup.
+HF_OAUTH_ENABLED = bool(os.getenv("SPACE_ID")) or os.getenv(
+    "ENABLE_HF_OAUTH", ""
+).lower() in {"1", "true", "yes"}
+
+
 def format_inference_report(metrics):
     if not metrics:
         return ""
@@ -55,9 +62,13 @@ def generate_response(
         return "", ""
 
     if not use_local_model:
-        token = getattr(hf_token, "token", None)
+        token = getattr(hf_token, "token", None) or os.getenv("HF_TOKEN")
         if not token:
-            return "", "### Login Required\n\nLog in with Hugging Face to use API mode."
+            return "", (
+                "### Hugging Face Token Required\n\n"
+                "Log in on Hugging Face Spaces, set `HF_TOKEN` on the server, "
+                "or select the local model."
+            )
 
         try:
             response, metrics = generate_api_math_representation(
@@ -131,7 +142,8 @@ EXAMPLE_PROMPTS = [
 ]
 
 with gr.Blocks(title="OSMS") as demo:
-    gr.LoginButton()
+    if HF_OAUTH_ENABLED:
+        gr.LoginButton()
 
     gr.Markdown(
         """

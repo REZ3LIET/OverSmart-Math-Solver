@@ -32,11 +32,13 @@ BOOTSTRAP_SSH_IDENTITY_FILE=/absolute/path/to/student-admin_key \
 It:
 
 1. Clones the repository on first setup or updates the existing checkout.
-2. Creates or reuses `.venv`.
-3. Installs dependencies only when `requirements.txt` changes.
-4. Stops the previous recorded app process.
-5. Starts Gradio on `127.0.0.1:8015` with `nohup`.
-6. Waits up to 30 seconds for an HTTP response.
+2. Installs missing Ubuntu/Debian prerequisites, including `python3-venv` and
+   `python3-pip`.
+3. Creates or repairs `.venv` when its Python or pip is unavailable.
+4. Installs dependencies only when `requirements.txt` changes.
+5. Stops the previous recorded app process.
+6. Starts Gradio on `127.0.0.1:8015` with `nohup`.
+7. Waits up to 30 seconds for an HTTP response.
 
 Application output and the PID are stored under:
 
@@ -44,9 +46,23 @@ Application output and the PID are stored under:
 $HOME/OverSmart-Math-Solver/.runtime/
 ```
 
-Setup progress is also recorded as `recovering`, `failed`, or `healthy` in
-`$HOME/.check/status`. The watcher uses the actual HTTP response—not this file—
-as its health decision. `bash/setup.sh.bk` is retained only as an earlier draft.
+Setup progress is recorded in `$HOME/.check/status` as `build-system`,
+`build-repo`, `build-venv`, `build-dependencies`, `build-app`, `failed`, or
+`healthy`. The watcher still uses the HTTP response for normal application
+health decisions. `bash/setup.sh.bk` is retained only as an earlier draft.
+
+Request a clean repository rebuild by writing `build-repo` from the watcher
+machine:
+
+```bash
+ssh -i /root/.ssh/osms-recovery/student-admin_paffenroth-23.dyn.wpi.edu_ed25519 \
+  -p 22015 student-admin@paffenroth-23.dyn.wpi.edu \
+  'mkdir -p "$HOME/.check" && printf "build-repo\\n" > "$HOME/.check/status"'
+```
+
+On its next check, the watcher stops the recorded app process, removes the
+existing application directory, clones a clean copy, and completes setup. Other
+`build-*` values report progress and do not request another setup.
 
 ## First-contact SSH key update
 
@@ -124,5 +140,8 @@ ssh -i /root/.ssh/osms-recovery/student-admin_paffenroth-23.dyn.wpi.edu_ed25519 
 - The watcher key is installed and verified before the previous login key is
   commented. If the update fails, the watcher retains the working key.
 - The watcher continues retrying SSH until the LXC becomes reachable.
-- The LXC must provide `bash`, `git`, `python3` with venv support, `curl`, and
-  `sha256sum`.
+- System package installation requires root or passwordless `sudo` on the LXC.
+- Normal health checks run every `CHECK_INTERVAL` (two seconds by default).
+- While setup is running, the watcher checks its progress every
+  `SETUP_CHECK_INTERVAL` (15 seconds by default) and never starts an overlapping
+  setup. After setup succeeds or fails, two-second health checks resume.

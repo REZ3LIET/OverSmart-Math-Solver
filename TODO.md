@@ -3,6 +3,10 @@
 - Optimize recovery time: use a shallow clone, pin/cache dependencies where
   possible, start remote inference first, and avoid blocking app startup on the
   local model download.
+- Optimize application cold start and dependency installation. Investigate a
+  prebuilt virtual environment or container image, a persistent pip/model cache,
+  a smaller dependency set, and lazy-loading large libraries so a rebuilt LXC
+  does not download everything before Gradio can become healthy.
 - Add a lightweight application health endpoint and measure recovery time from
   the first failed check until that endpoint becomes healthy.
 - Decide how the recovered app process will be supervised (`systemd`, a user
