@@ -37,7 +37,8 @@ It:
 3. Creates or repairs `.venv` when its Python or pip is unavailable.
 4. Installs dependencies only when `requirements.txt` changes.
 5. Stops the previous recorded app process.
-6. Starts Gradio on `127.0.0.1:8015` with `nohup`.
+6. Starts Gradio on `0.0.0.0:8015` with `nohup` and probes it through
+   `127.0.0.1:8015`.
 7. Waits up to `APP_START_TIMEOUT` (180 seconds by default) for an HTTP
    response. This accommodates slow cold imports on a newly rebuilt LXC.
 

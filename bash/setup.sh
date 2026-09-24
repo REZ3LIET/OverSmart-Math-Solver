@@ -9,7 +9,8 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/REZ3LIET/OverSmart-Math-Solver.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 APP_DIR="${APP_DIR:-$HOME/OverSmart-Math-Solver}"
-APP_HOST="${APP_HOST:-127.0.0.1}"
+APP_HOST="${APP_HOST:-0.0.0.0}"
+HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
 APP_PORT="${APP_PORT:-8015}"
 APP_START_TIMEOUT="${APP_START_TIMEOUT:-180}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -139,7 +140,7 @@ printf '%s\n' "$app_pid" > "$pid_file"
 # until Gradio answers, but allow up to APP_START_TIMEOUT seconds.
 for (( elapsed = 0; elapsed < APP_START_TIMEOUT; elapsed++ )); do
     if curl --fail --silent --max-time 1 \
-        "http://$APP_HOST:$APP_PORT/" >/dev/null
+        "http://$HEALTH_HOST:$APP_PORT/" >/dev/null
     then
         printf '%s\n' "$deployed_commit" > "$APP_DIR/.runtime/app.commit"
         printf 'healthy\n' > "$STATE_DIR/status"
