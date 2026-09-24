@@ -7,6 +7,10 @@
   prebuilt virtual environment or container image, a persistent pip/model cache,
   a smaller dependency set, and lazy-loading large libraries so a rebuilt LXC
   does not download everything before Gradio can become healthy.
+- Investigate local inference: confirm that selecting the local model calls the
+  local inference path, verify that the configured model is downloaded, record
+  its cache location and download errors, and add a clear UI/status indication
+  while the model is downloading or loading.
 - Add a lightweight application health endpoint and measure recovery time from
   the first failed check until that endpoint becomes healthy.
 - Decide how the recovered app process will be supervised (`systemd`, a user
