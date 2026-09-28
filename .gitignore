@@ -149,6 +149,9 @@ activemq-data/
 
 # Environments
 .env
+.deploy-cache/
+*runtime-cache.tar
+*runtime-cache.tar.sha256
 
 # Local recovery credentials (never commit these)
 bash/*_ed25519

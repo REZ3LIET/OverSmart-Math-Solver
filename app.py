@@ -2,6 +2,8 @@ import os
 import traceback
 
 import gradio as gr
+from fastapi import FastAPI
+import uvicorn
 
 from model_inference import generate_api_math_representation, generate_math_representation
 
@@ -262,9 +264,33 @@ with gr.Blocks(title="OSMS") as demo:
     )
 
 
-if __name__ == "__main__":
-    demo.launch(
-        server_name=os.getenv("GRADIO_SERVER_NAME", "0.0.0.0"),
-        server_port=int(os.getenv("GRADIO_SERVER_PORT", "8015")),
+# Standalone deployments mount Gradio beneath a small FastAPI parent. This
+# keeps /healthz independent of UI rendering and model inference.
+standalone_app = None
+if not HF_OAUTH_ENABLED:
+    parent_app = FastAPI()
+
+    @parent_app.get("/healthz", include_in_schema=False)
+    async def healthz():
+        return {"status": "healthy"}
+
+    standalone_app = gr.mount_gradio_app(
+        parent_app,
+        demo,
+        path="/",
         ssr_mode=False,
     )
+
+
+if __name__ == "__main__":
+    server_name = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
+    server_port = int(os.getenv("GRADIO_SERVER_PORT", "8015"))
+
+    if standalone_app is not None:
+        uvicorn.run(standalone_app, host=server_name, port=server_port)
+    else:
+        demo.launch(
+            server_name=server_name,
+            server_port=server_port,
+            ssr_mode=False,
+        )

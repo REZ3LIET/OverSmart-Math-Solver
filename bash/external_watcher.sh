@@ -20,12 +20,15 @@ DEPLOY_CHECK_INTERVAL="${DEPLOY_CHECK_INTERVAL:-30}"
 SSH_RETRY_INTERVAL="${SSH_RETRY_INTERVAL:-1}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-2}"
 CREDENTIALS_DIR="${CREDENTIALS_DIR:-$HOME/.ssh/osms-recovery}"
+DEPLOY_CACHE_ARCHIVE="${DEPLOY_CACHE_ARCHIVE:-}"
+USE_DEPLOY_CACHE="${USE_DEPLOY_CACHE:-false}"
 UPDATE_SSH_KEY_ON_FIRST_PING="${UPDATE_SSH_KEY_ON_FIRST_PING:-true}"
-DEFAULT_HEALTH_COMMAND='if curl --fail --silent --max-time 2 http://127.0.0.1:8015/ >/dev/null; then printf healthy; else pid=$(cat "$HOME/OverSmart-Math-Solver/.runtime/app.pid" 2>/dev/null || true); test -n "$pid" && kill -0 "$pid" 2>/dev/null && printf busy; fi'
+DEFAULT_HEALTH_COMMAND='if curl --fail --silent --max-time 2 http://127.0.0.1:8015/healthz >/dev/null || curl --fail --silent --max-time 2 http://127.0.0.1:8015/ >/dev/null; then printf healthy; else pid=$(cat "$HOME/OverSmart-Math-Solver/.runtime/app.pid" 2>/dev/null || true); test -n "$pid" && kill -0 "$pid" 2>/dev/null && printf busy; fi'
 REMOTE_HEALTH_COMMAND="${REMOTE_HEALTH_COMMAND:-$DEFAULT_HEALTH_COMMAND}"
 DEFAULT_STATUS_COMMAND='cat "$HOME/.check/status" 2>/dev/null || printf missing'
 REMOTE_STATUS_COMMAND="${REMOTE_STATUS_COMMAND:-$DEFAULT_STATUS_COMMAND}"
 SSH_BIN="${SSH_BIN:-ssh}"
+SCP_BIN="${SCP_BIN:-scp}"
 
 # Resolve repository-relative script paths.
 [[ "$RECOVERY_SCRIPT" = /* ]] || RECOVERY_SCRIPT="$SCRIPT_DIR/../$RECOVERY_SCRIPT"
@@ -56,6 +59,7 @@ active_key="$bootstrap_key"
 working_key=""
 key_update_needed=true
 recovery_pid=""
+recovery_started_epoch=0
 last_deploy_check=0
 
 # Try the stable key first. A rebuilt LXC falls back to its original key.
@@ -103,6 +107,72 @@ update_remote_access() {
     key_update_needed=false
 }
 
+# Upload the prepared environment/model archive only to a fresh or explicitly
+# rebuilt deployment. A checksum marker avoids repeating the large transfer.
+sync_deploy_cache() {
+    local force_rebuild="$1"
+    local local_checksum remote_checksum
+
+    recovery_cache_archive=""
+    recovery_cache_checksum=""
+    [[ "$USE_DEPLOY_CACHE" == true ]] || return 0
+    [[ -n "$DEPLOY_CACHE_ARCHIVE" ]] || return 0
+    if [[ ! -r "$DEPLOY_CACHE_ARCHIVE" ]]; then
+        log "Deployment cache is not readable; continuing without it: $DEPLOY_CACHE_ARCHIVE"
+        return 0
+    fi
+
+    if [[ -r "$DEPLOY_CACHE_ARCHIVE.sha256" ]]; then
+        local_checksum="$(awk 'NR == 1 {print $1}' "$DEPLOY_CACHE_ARCHIVE.sha256")"
+    else
+        local_checksum="$(sha256sum "$DEPLOY_CACHE_ARCHIVE" | awk '{print $1}')"
+    fi
+    recovery_cache_checksum="$local_checksum"
+    remote_checksum="$(remote "$working_key" \
+        'cat "$HOME/.cache/osms-deploy-cache.sha256" 2>/dev/null || true' \
+        2>/dev/null || true)"
+
+    if [[ "$force_rebuild" != true && "$local_checksum" == "$remote_checksum" ]]; then
+        log "Deployment cache is already installed."
+        return 0
+    fi
+
+    recovery_cache_archive="/tmp/osms-deploy-cache.tar"
+    log "Uploading prepared Python environment and model cache."
+    if ! "$SCP_BIN" \
+        -o BatchMode=yes \
+        -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
+        -P "$SSH_PORT" \
+        -i "$working_key" \
+        "$DEPLOY_CACHE_ARCHIVE" \
+        "$WATCH_TARGET:$recovery_cache_archive"
+    then
+        log "Deployment cache upload failed; continuing with normal installation."
+        recovery_cache_archive=""
+    fi
+}
+
+run_recovery() {
+    local force_rebuild="$1"
+
+    sync_deploy_cache "$force_rebuild"
+    if [[ -n "$recovery_cache_archive" ]]; then
+        remote "$working_key" \
+            "FORCE_REBUILD_REPO=$force_rebuild DEPLOY_CACHE_ARCHIVE=$recovery_cache_archive DEPLOY_CACHE_CHECKSUM=$recovery_cache_checksum bash -s" \
+            < "$RECOVERY_SCRIPT"
+    else
+        remote "$working_key" \
+            "FORCE_REBUILD_REPO=$force_rebuild bash -s" \
+            < "$RECOVERY_SCRIPT"
+    fi
+}
+
+start_recovery() {
+    recovery_started_epoch="$(date +%s)"
+    run_recovery "$1" &
+    recovery_pid=$!
+}
+
 while true; do
     wait_for_ssh
 
@@ -124,9 +194,9 @@ while true; do
         fi
 
         if wait "$recovery_pid"; then
-            log "Recovery completed."
+            log "Recovery completed in $(( $(date +%s) - recovery_started_epoch )) seconds."
         else
-            log "Recovery failed; returning to $CHECK_INTERVAL-second checks."
+            log "Recovery failed after $(( $(date +%s) - recovery_started_epoch )) seconds; returning to $CHECK_INTERVAL-second checks."
         fi
         recovery_pid=""
         sleep "$CHECK_INTERVAL"
@@ -138,8 +208,7 @@ while true; do
     # Writing build-repo to the remote status file requests a clean checkout.
     if [[ "$remote_status" == "build-repo" ]]; then
         log "Clean repository rebuild requested."
-        remote "$working_key" 'FORCE_REBUILD_REPO=true bash -s' < "$RECOVERY_SCRIPT" &
-        recovery_pid=$!
+        start_recovery true
         sleep "$SETUP_CHECK_INTERVAL"
         continue
     fi
@@ -172,8 +241,7 @@ while true; do
 
                 if [[ -n "${latest_revision:-}" && "$running_revision" != "$latest_revision" ]]; then
                     log "New commit detected: ${running_revision:-missing} -> $latest_revision; deploying."
-                    remote "$working_key" 'bash -s' < "$RECOVERY_SCRIPT" &
-                    recovery_pid=$!
+                    start_recovery false
                     sleep "$SETUP_CHECK_INTERVAL"
                     continue
                 fi
@@ -185,8 +253,7 @@ while true; do
         # SSH itself uses exit code 255 when the connection disappears.
         (( health_result == 255 )) && key_update_needed=true
         log "Application is unhealthy; running recovery."
-        remote "$working_key" 'bash -s' < "$RECOVERY_SCRIPT" &
-        recovery_pid=$!
+        start_recovery false
         sleep "$SETUP_CHECK_INTERVAL"
         continue
     fi

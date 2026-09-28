@@ -15,6 +15,8 @@ APP_PORT="${APP_PORT:-8015}"
 APP_START_TIMEOUT="${APP_START_TIMEOUT:-180}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REBUILD_REPO="${FORCE_REBUILD_REPO:-false}"
+DEPLOY_CACHE_ARCHIVE="${DEPLOY_CACHE_ARCHIVE:-}"
+DEPLOY_CACHE_CHECKSUM="${DEPLOY_CACHE_CHECKSUM:-}"
 
 STATE_DIR="$HOME/.check"
 mkdir -p "$STATE_DIR"
@@ -54,7 +56,7 @@ stop_recorded_app() {
 # Install the small OS-level prerequisites on Ubuntu/Debian. Already-installed
 # packages are skipped, so apt is normally used only on a fresh LXC.
 printf 'build-system\n' > "$STATE_DIR/status"
-packages=(git curl ca-certificates coreutils python3 python3-venv python3-pip)
+packages=(git curl ca-certificates coreutils tar python3 python3-venv python3-pip)
 missing_packages=()
 for package in "${packages[@]}"; do
     dpkg -s "$package" >/dev/null 2>&1 || missing_packages+=("$package")
@@ -102,6 +104,18 @@ cd "$APP_DIR"
 deployed_commit="$(git rev-parse HEAD)"
 log "Using repository commit ${deployed_commit:0:7}."
 
+# A fresh LXC can receive a prepared virtual environment and model cache from
+# the external watcher. The archive is created only from a trusted deployment.
+if [[ -n "$DEPLOY_CACHE_ARCHIVE" && -r "$DEPLOY_CACHE_ARCHIVE" ]]; then
+    printf 'build-cache\n' > "$STATE_DIR/status"
+    log "Restoring cached Python environment and local model."
+    cache_checksum="${DEPLOY_CACHE_CHECKSUM:-$(sha256sum "$DEPLOY_CACHE_ARCHIVE" | awk '{print $1}')}"
+    tar -C "$HOME" -xf "$DEPLOY_CACHE_ARCHIVE"
+    mkdir -p "$HOME/.cache"
+    printf '%s\n' "$cache_checksum" > "$HOME/.cache/osms-deploy-cache.sha256"
+    rm -f -- "$DEPLOY_CACHE_ARCHIVE"
+fi
+
 # Reuse the environment after the first setup. Reinstall only when the
 # requirements file changes.
 printf 'build-venv\n' > "$STATE_DIR/status"
@@ -140,6 +154,8 @@ printf '%s\n' "$app_pid" > "$pid_file"
 # until Gradio answers, but allow up to APP_START_TIMEOUT seconds.
 for (( elapsed = 0; elapsed < APP_START_TIMEOUT; elapsed++ )); do
     if curl --fail --silent --max-time 1 \
+        "http://$HEALTH_HOST:$APP_PORT/healthz" >/dev/null || \
+        curl --fail --silent --max-time 1 \
         "http://$HEALTH_HOST:$APP_PORT/" >/dev/null
     then
         printf '%s\n' "$deployed_commit" > "$APP_DIR/.runtime/app.commit"

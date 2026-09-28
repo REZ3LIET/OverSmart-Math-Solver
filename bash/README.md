@@ -49,9 +49,60 @@ $HOME/OverSmart-Math-Solver/.runtime/
 ```
 
 Setup progress is recorded in `$HOME/.check/status` as `build-system`,
-`build-repo`, `build-venv`, `build-dependencies`, `build-app`, `failed`, or
-`healthy`. The watcher still uses the HTTP response for normal application
-health decisions. `bash/setup.sh.bk` is retained only as an earlier draft.
+`build-repo`, `build-cache`, `build-venv`, `build-dependencies`, `build-app`,
+`failed`, or `healthy`. The watcher uses `/healthz` plus process liveness for
+normal health decisions. `bash/setup.sh.bk` is retained only as an earlier
+draft.
+
+## Prepared environment and model cache
+
+After one LXC has a working virtual environment and the local model has fully
+downloaded, build an external deployment cache:
+
+```bash
+./bash/build_deploy_cache.sh
+```
+
+The configured archive location is:
+
+```text
+/root/osms-deploy-cache/osms-runtime-cache.tar
+```
+
+The archive contains `.venv`, the configured Hugging Face model cache, and any
+shared blob targets referenced by that model. It is not committed to Git. On a
+fresh or cleanly rebuilt LXC, the watcher SCPs this archive to `/tmp`, and
+`setup.sh` restores it under the remote user's home directory before checking
+dependencies. A SHA-256 marker prevents repeated multi-gigabyte uploads to an
+unchanged LXC.
+
+Rebuild the archive whenever `requirements.txt`, the Python/OS version, or the
+local model changes. The cached virtual environment assumes the rebuilt LXC uses
+the same username, home path, OS architecture, and Python minor version.
+
+Enable automatic cache upload with:
+
+```text
+USE_DEPLOY_CACHE=true
+```
+
+It defaults to `false` because the September 28, 2026 benchmark on this LXC
+found that its slow extraction made the complete archive slower than fresh
+downloads:
+
+| Path | Stage | Seconds |
+|---|---|---:|
+| Fresh | Git clone | 0.7 |
+| Fresh | Create venv | 2.2 |
+| Fresh | Uncached pip install | 301.5 |
+| Fresh | Model download | 36.6 |
+| Fresh | **Total** | **341.0** |
+| Cached | SCP 7.7 GB archive | 240.9 |
+| Cached | Extract and verify | 365.3 |
+| Cached | **Total** | **606.2** |
+
+The cache remains useful for offline or deterministic recovery, but enabling it
+increased recovery time by about 78% on this machine.
 
 Request a clean repository rebuild by writing `build-repo` from the watcher
 machine:
