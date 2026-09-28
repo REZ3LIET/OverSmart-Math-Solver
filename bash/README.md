@@ -204,3 +204,24 @@ ssh -i /root/.ssh/osms-recovery/student-admin_paffenroth-23.dyn.wpi.edu_ed25519 
 - While setup is running, the watcher checks its progress every
   `SETUP_CHECK_INTERVAL` (15 seconds by default) and never starts an overlapping
   setup. After setup succeeds or fails, two-second health checks resume.
+
+## SSH connection reuse
+
+Normal monitoring uses one combined SSH probe per cycle. That probe returns the
+remote build status, application health, and—every 30 seconds—the running and
+latest Git revisions. The preliminary SSH reachability check runs only while
+establishing or re-establishing contact, not before every health probe.
+
+SSH multiplexing is enabled by default:
+
+```text
+SSH_MULTIPLEXING=true
+SSH_CONTROL_PERSIST=60
+```
+
+The first command performs the normal TCP connection, key exchange, and key
+authentication. Later probes open lightweight channels over that authenticated
+connection. The control socket is stored beneath
+`$CREDENTIALS_DIR/ssh-control/`. If the transport is lost, the watcher discards
+its active connection state and resumes the stable-key/bootstrap-key retry
+sequence.
