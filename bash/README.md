@@ -8,23 +8,40 @@ the LXC and runs it with Bash.
 ## Configuration
 
 The watcher automatically loads `.env` from the repository root. Start from
-`.env.example` on a fresh checkout and set the machine-specific values. Supply
-the initial key that exists on a newly rebuilt LXC as
-`BOOTSTRAP_SSH_IDENTITY_FILE`. The watcher automatically uses its stable watcher
-key when that key is already installed remotely.
+`.env.example` on a fresh checkout and set the machine-specific values. Put the
+path of the initial key restored by a fresh LXC in `.env` once:
 
-Current watcher command:
-
-```bash
-BOOTSTRAP_SSH_IDENTITY_FILE=student-admin_key ./bash/external_watcher.sh
+```text
+BOOTSTRAP_SSH_IDENTITY_FILE=/absolute/path/to/student-admin_key
 ```
 
-Use an absolute path if the key is outside the repository directory:
+The watcher always tries its generated stable key first. If that fails after a
+rebuild, it automatically tries the bootstrap key, reinstalls and verifies the
+stable key, disables the bootstrap key remotely, and continues with the stable
+key. You do not choose a key when launching it.
+
+The watcher command is simply:
 
 ```bash
-BOOTSTRAP_SSH_IDENTITY_FILE=/absolute/path/to/student-admin_key \
-  ./bash/external_watcher.sh
+./bash/external_watcher.sh
 ```
+
+The watcher stores server host keys in `$CREDENTIALS_DIR/known_hosts`, separate
+from your normal `~/.ssh/known_hosts`. The default
+`SSH_STRICT_HOST_KEY_CHECKING=accept-new` accepts first contact but stops if a
+known server's host key changes. That protects against impersonation.
+
+If this disposable test LXC generates a new SSH host key after every rebuild
+and fully unattended recovery is more important than host authentication, set:
+
+```text
+SSH_STRICT_HOST_KEY_CHECKING=no
+```
+
+Use `no` only when you trust the lab network and endpoint. There is no secure
+way for the watcher to distinguish an expected rebuilt LXC from an attacker if
+the machine has no persistent host identity. SSH failures now include the final
+error line every five attempts instead of only saying that SSH is not ready.
 
 ## Recovery setup script
 
@@ -36,11 +53,15 @@ It:
    `python3-pip`.
 3. Creates or repairs `.venv` when its Python or pip is unavailable.
 4. Installs dependencies only when `requirements.txt` changes.
-5. Stops the previous recorded app process.
-6. Starts Gradio on `0.0.0.0:8015` with `nohup` and probes it through
+5. Downloads and verifies the configured local Hugging Face model. Existing
+   cached files are reused.
+6. Stops the previous recorded app process.
+7. Starts Gradio on `0.0.0.0:8015` with `nohup`, preloads the local model into
+   that process, and probes it through
    `127.0.0.1:8015`.
-7. Waits up to `APP_START_TIMEOUT` (180 seconds by default) for an HTTP
-   response. This accommodates slow cold imports on a newly rebuilt LXC.
+8. Waits up to `APP_START_TIMEOUT` (180 seconds by default) for an HTTP
+   response. Because model preload occurs before the HTTP server starts, a
+   healthy response means the local fallback is ready for requests.
 
 Application output and the PID are stored under:
 
@@ -48,11 +69,25 @@ Application output and the PID are stored under:
 $HOME/OverSmart-Math-Solver/.runtime/
 ```
 
+Follow the application log from the watcher machine with:
+
+```bash
+ssh -i "$CREDENTIALS_DIR/student-admin_paffenroth-23.dyn.wpi.edu_ed25519" \
+  -p 22015 student-admin@paffenroth-23.dyn.wpi.edu \
+  'tail -n 100 -F "$HOME/OverSmart-Math-Solver/.runtime/app.log"'
+```
+
+If you are already inside the LXC, use:
+
+```bash
+tail -n 100 -F "$HOME/OverSmart-Math-Solver/.runtime/app.log"
+```
+
 Setup progress is recorded in `$HOME/.check/status` as `build-system`,
-`build-repo`, `build-cache`, `build-venv`, `build-dependencies`, `build-app`,
-`failed`, or `healthy`. The watcher uses `/healthz` plus process liveness for
-normal health decisions. `bash/setup.sh.bk` is retained only as an earlier
-draft.
+`build-repo`, `build-cache`, `build-venv`, `build-dependencies`, `build-model`,
+`build-app`, `failed`, or `healthy`. The watcher uses `/healthz` plus process
+liveness for normal health decisions. `bash/setup.sh.bk` is retained only as
+an earlier draft.
 
 ## Prepared environment and model cache
 
@@ -225,3 +260,35 @@ connection. The control socket is stored beneath
 `$CREDENTIALS_DIR/ssh-control/`. If the transport is lost, the watcher discards
 its active connection state and resumes the stable-key/bootstrap-key retry
 sequence.
+
+## Resource monitoring
+
+The same combined SSH probe reads cumulative CPU counters, available system
+memory, and—when `nvidia-smi` exists—GPU utilization and GPU memory. Samples are
+written to:
+
+```text
+logs/resource_usage.csv
+```
+
+The first CPU sample is `unavailable` because CPU utilization requires two
+cumulative readings; subsequent samples cover the interval between watcher
+checks. Default warning thresholds are:
+
+```text
+CPU_THRESHOLD=80
+MEMORY_THRESHOLD=80
+GPU_THRESHOLD=80
+GPU_MEMORY_THRESHOLD=80
+RESOURCE_ALERT_COOLDOWN=60
+```
+
+Warnings currently appear in watcher output and are limited to one per cooldown
+period. Discord delivery and automated overload reactions remain explicit TODOs.
+An unavailable GPU is recorded as `unavailable`, not as zero utilization.
+
+Follow resource samples on the watcher machine with:
+
+```bash
+tail -n 20 -F logs/resource_usage.csv
+```

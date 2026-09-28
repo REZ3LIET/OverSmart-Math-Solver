@@ -13,6 +13,8 @@ set -euo pipefail
 : "${CREDENTIALS_DIR:?}"
 
 SSH_BIN="${SSH_BIN:-ssh}"
+SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+SSH_KNOWN_HOSTS_FILE="${SSH_KNOWN_HOSTS_FILE:-$CREDENTIALS_DIR/known_hosts}"
 
 mkdir -p "$CREDENTIALS_DIR"
 chmod 700 "$CREDENTIALS_DIR"
@@ -49,6 +51,8 @@ connect() {
     "$SSH_BIN" \
         -o BatchMode=yes \
         -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
+        -o "StrictHostKeyChecking=$SSH_STRICT_HOST_KEY_CHECKING" \
+        -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE" \
         -p "$SSH_PORT" \
         -i "$key" \
         "$WATCH_TARGET" "$@"

@@ -5,7 +5,11 @@ import gradio as gr
 from fastapi import FastAPI
 import uvicorn
 
-from model_inference import generate_api_math_representation, generate_math_representation
+from model_inference import (
+    generate_api_math_representation,
+    generate_math_representation,
+    preload_local_model,
+)
 
 
 # Hugging Face Spaces configures OAuth for us. A standalone deployment does
@@ -285,6 +289,16 @@ if not HF_OAUTH_ENABLED:
 if __name__ == "__main__":
     server_name = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
     server_port = int(os.getenv("GRADIO_SERVER_PORT", "8015"))
+    preload_enabled = os.getenv("OSMS_PRELOAD_LOCAL_MODEL", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    if preload_enabled:
+        print("Preloading the local Hugging Face model.", flush=True)
+        preload_local_model()
+        print("Local Hugging Face model is ready.", flush=True)
 
     if standalone_app is not None:
         uvicorn.run(standalone_app, host=server_name, port=server_port)

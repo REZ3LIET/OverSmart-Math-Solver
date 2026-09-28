@@ -17,6 +17,8 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REBUILD_REPO="${FORCE_REBUILD_REPO:-false}"
 DEPLOY_CACHE_ARCHIVE="${DEPLOY_CACHE_ARCHIVE:-}"
 DEPLOY_CACHE_CHECKSUM="${DEPLOY_CACHE_CHECKSUM:-}"
+OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit}"
+OSMS_PRELOAD_LOCAL_MODEL="${OSMS_PRELOAD_LOCAL_MODEL:-true}"
 
 STATE_DIR="$HOME/.check"
 mkdir -p "$STATE_DIR"
@@ -133,6 +135,19 @@ if [[ "$requirements_hash" != "$installed_hash" ]]; then
     printf '%s\n' "$requirements_hash" > .venv/.requirements.sha256
 fi
 
+# Download the complete local fallback model during recovery. Hugging Face
+# reuses verified cached files, so this is quick on an unchanged container and
+# performs the full download only after a fresh rebuild or model change.
+printf 'build-model\n' > "$STATE_DIR/status"
+log "Ensuring local model is installed: $OSMS_MODEL_NAME"
+OSMS_MODEL_NAME="$OSMS_MODEL_NAME" .venv/bin/python - <<'PY'
+from huggingface_hub import snapshot_download
+from model_inference import DEFAULT_MODEL_NAME
+
+snapshot_download(DEFAULT_MODEL_NAME)
+print(f"Local model snapshot is ready: {DEFAULT_MODEL_NAME}", flush=True)
+PY
+
 # Keep the PID and application output together in a disposable runtime folder.
 mkdir -p .runtime
 pid_file="$APP_DIR/.runtime/app.pid"
@@ -145,6 +160,8 @@ log "Starting Gradio on $APP_HOST:$APP_PORT."
 nohup env \
     GRADIO_SERVER_NAME="$APP_HOST" \
     GRADIO_SERVER_PORT="$APP_PORT" \
+    OSMS_MODEL_NAME="$OSMS_MODEL_NAME" \
+    OSMS_PRELOAD_LOCAL_MODEL="$OSMS_PRELOAD_LOCAL_MODEL" \
     .venv/bin/python app.py \
     > "$log_file" 2>&1 < /dev/null &
 app_pid=$!

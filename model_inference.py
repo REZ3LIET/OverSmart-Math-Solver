@@ -54,6 +54,11 @@ def _load_model(model_name: str = DEFAULT_MODEL_NAME):
     return model, tokenizer
 
 
+def preload_local_model():
+    """Download (if needed) and retain the local model in this process."""
+    _load_model()
+
+
 def _model_input_device(model):
     if hasattr(model, "hf_device_map") and model.hf_device_map:
         for device in model.hf_device_map.values():

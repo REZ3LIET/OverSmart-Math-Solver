@@ -5,7 +5,8 @@
 - [x] Use shallow Git clone/fetch during recovery.
 - [x] Reuse the virtual environment and install dependencies only when
   `requirements.txt` changes.
-- [x] Lazy-load the local model instead of blocking Gradio startup.
+- [x] Download the local model during recovery and preload it in the Gradio
+  process before the deployment reports healthy.
 - [x] Track the commit that successfully started and restart the app when a new
   commit is pushed.
 - [x] Treat a live but temporarily unresponsive inference process as `busy`
@@ -20,6 +21,11 @@
 - [x] Benchmark cold download versus full-cache restore. Fresh download took
   341.0 seconds; SCP plus extraction took 606.2 seconds, so full-cache restore
   is retained as an optional reliability feature and disabled by default.
+- [x] Track CPU, system memory, GPU utilization, and GPU memory in the combined
+  watcher probe. Persist samples to `logs/resource_usage.csv` and emit
+  rate-limited warnings when configured thresholds are exceeded.
+- [x] Confirm successful local-model generation. The remote log contains
+  completed generated responses from the configured model.
 
 ## Partially completed
 
@@ -27,9 +33,8 @@
   and model downloads, but is slower on this LXC. Investigate a smaller
   dependency set, a host-level prebuilt image, or an archive that can be used
   without extracting 7.7 GB.
-- [ ] Finish validating local inference. The model snapshot and 2 GB weights are
-  present with no incomplete files, but a successful local generation has not
-  yet been confirmed. Add clear UI/status feedback while it downloads or loads.
+- [ ] Add clear UI/status feedback while the local model downloads, loads, or
+  performs slow CPU inference.
 
 ## Open
 
@@ -39,3 +44,10 @@
 - [ ] Supply application secrets during recovery without committing them or
   printing them in logs.
 - [ ] Add notifications for recovery attempts that continue to fail.
+- [ ] Send rate-limited Discord webhook notifications when a resource threshold
+  is exceeded. Keep the webhook URL outside Git and redact it from logs.
+- [ ] Add an overload reaction policy: switch to a smaller model, reduce token
+  limits/concurrency, queue or reject new work, and show a near-capacity message
+  in the UI. Add hysteresis so behavior does not flap around 80%.
+- [ ] Remove unnecessary CUDA packages from the CPU-only LXC environment and
+  benchmark a smaller CPU-oriented model and lower default token limit.
