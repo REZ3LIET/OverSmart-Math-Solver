@@ -56,6 +56,17 @@ bootstrap_key="$BOOTSTRAP_SSH_IDENTITY_FILE"
 active_key="$bootstrap_key"
 [[ -r "$stable_key" ]] && active_key="$stable_key"
 
+if [[ ! -r "$stable_key" && ! -r "$bootstrap_key" ]]; then
+    log "No readable SSH key was found."
+    log "Stable key checked: $stable_key"
+    log "Bootstrap key checked: $bootstrap_key"
+    exit 1
+fi
+if [[ ! -r "$bootstrap_key" ]]; then
+    log "Warning: bootstrap key is not readable: $bootstrap_key"
+    log "The stable key can reach the current LXC, but not a fresh rebuild."
+fi
+
 working_key=""
 key_update_needed=true
 recovery_pid=""
