@@ -295,6 +295,11 @@ Configure Discord in `.env`:
 ```text
 DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
 DISCORD_USERNAME='OSMS Watcher'
+DISCORD_NOTIFY_REPO_UPDATES=true
+DISCORD_NOTIFY_SERVER_STATE=true
+DISCORD_NOTIFY_APP_STATE=true
+DISCORD_NOTIFY_RECOVERY=true
+SERVER_DOWN_NOTIFY_AFTER=3
 ```
 
 Send one test notification without starting the monitoring loop:
@@ -302,6 +307,24 @@ Send one test notification without starting the monitoring loop:
 ```bash
 ./bash/external_watcher.sh --test-discord
 ```
+
+Notifications are event-driven and reuse existing probes; they do not add SSH
+checks. The watcher reports:
+
+- repository revision changes and the resulting deployment;
+- model-configuration drift even when the Git revision is unchanged;
+- SSH/server unavailability after three failed cycles, plus connectivity
+  restoration;
+- SSH authentication or host-verification failures without mislabeling them as
+  a powered-off server;
+- remote `.check/status=failed` and its return to `healthy`;
+- application health loss and restoration (`busy` is not treated as down);
+- threshold violations, subject to `RESOURCE_ALERT_COOLDOWN`;
+- recovery success or failure, with repeated failures limited by
+  `RECOVERY_ALERT_COOLDOWN`.
+
+Set any `DISCORD_NOTIFY_*` value to `false` to disable that category. The
+server-down grace count avoids notifying on a single transient SSH failure.
 
 The standalone deployment defaults to `Qwen/Qwen2.5-0.5B-Instruct`, CPU-only
 PyTorch, and 128 maximum new tokens. Gradio displays model readiness when the

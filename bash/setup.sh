@@ -219,6 +219,7 @@ for (( elapsed = 0; elapsed < APP_START_TIMEOUT; elapsed++ )); do
         "http://$HEALTH_HOST:$APP_PORT/" >/dev/null
     then
         printf '%s\n' "$deployed_commit" > "$APP_DIR/.runtime/app.commit"
+        printf '%s\n' "$OSMS_MODEL_NAME" > "$APP_DIR/.runtime/app.model"
         printf 'healthy\n' > "$STATE_DIR/status"
         trap - ERR
         log "Application is healthy (PID $app_pid)."

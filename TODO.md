@@ -28,6 +28,9 @@
 - [x] Add Gradio model-readiness and request-stage progress feedback.
 - [x] Add rate-limited Discord webhook alerts for resource thresholds and
   repeated recovery failures without logging the webhook URL.
+- [x] Add event-driven Discord notifications for repository deployments,
+  SSH/server outages and restoration, failed remote state, and application
+  health loss and restoration without adding monitoring probes.
 - [x] Replace the CUDA-oriented dependency path with CPU-only PyTorch, remove
   `bitsandbytes`/CUDA runtime packages, and select the smaller
   `Qwen/Qwen2.5-0.5B-Instruct` model with a 128-token default.

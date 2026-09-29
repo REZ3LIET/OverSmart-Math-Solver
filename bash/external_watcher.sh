@@ -41,35 +41,16 @@ GPU_THRESHOLD="${GPU_THRESHOLD:-80}"
 GPU_MEMORY_THRESHOLD="${GPU_MEMORY_THRESHOLD:-80}"
 RESOURCE_ALERT_COOLDOWN="${RESOURCE_ALERT_COOLDOWN:-60}"
 RECOVERY_ALERT_COOLDOWN="${RECOVERY_ALERT_COOLDOWN:-300}"
+SERVER_DOWN_NOTIFY_AFTER="${SERVER_DOWN_NOTIFY_AFTER:-3}"
 RESOURCE_LOG_FILE="${RESOURCE_LOG_FILE:-$SCRIPT_DIR/../logs/resource_usage.csv}"
 DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 DISCORD_USERNAME="${DISCORD_USERNAME:-OSMS Watcher}"
+DISCORD_NOTIFY_REPO_UPDATES="${DISCORD_NOTIFY_REPO_UPDATES:-true}"
+DISCORD_NOTIFY_SERVER_STATE="${DISCORD_NOTIFY_SERVER_STATE:-true}"
+DISCORD_NOTIFY_APP_STATE="${DISCORD_NOTIFY_APP_STATE:-true}"
+DISCORD_NOTIFY_RECOVERY="${DISCORD_NOTIFY_RECOVERY:-true}"
 OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
 OSMS_PRELOAD_LOCAL_MODEL="${OSMS_PRELOAD_LOCAL_MODEL:-true}"
-
-# Keep watcher host keys separate from the user's normal SSH configuration.
-mkdir -p "$CREDENTIALS_DIR"
-chmod 700 "$CREDENTIALS_DIR"
-touch "$SSH_KNOWN_HOSTS_FILE"
-chmod 600 "$SSH_KNOWN_HOSTS_FILE"
-ssh_host_options=(
-    -o "StrictHostKeyChecking=$SSH_STRICT_HOST_KEY_CHECKING"
-    -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
-)
-
-# Multiplexing keeps one authenticated transport alive. Later SSH/SCP commands
-# open lightweight channels over it instead of repeating a full handshake.
-ssh_control_options=()
-if [[ "$SSH_MULTIPLEXING" == true ]]; then
-    SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-$CREDENTIALS_DIR/ssh-control}"
-    mkdir -p "$SSH_CONTROL_DIR"
-    chmod 700 "$SSH_CONTROL_DIR"
-    ssh_control_options=(
-        -o ControlMaster=auto
-        -o ControlPersist="$SSH_CONTROL_PERSIST"
-        -o ControlPath="$SSH_CONTROL_DIR/%C"
-    )
-fi
 
 # Resolve repository-relative script and key paths. This makes the watcher
 # independent of the directory from which it is launched.
@@ -130,6 +111,39 @@ elif (( $# > 0 )); then
     exit 2
 fi
 
+# Discord testing exits above and therefore does not depend on SSH paths or
+# permissions. Normal monitoring keeps its host keys separate from the user's
+# standard SSH configuration.
+if ! mkdir -p "$CREDENTIALS_DIR" || ! chmod 700 "$CREDENTIALS_DIR"; then
+    log "Credentials directory is not writable: $CREDENTIALS_DIR"
+    log "Set CREDENTIALS_DIR in .env to a directory owned by $(id -un)."
+    exit 1
+fi
+if ! touch "$SSH_KNOWN_HOSTS_FILE" || ! chmod 600 "$SSH_KNOWN_HOSTS_FILE"; then
+    log "Watcher known-hosts file is not writable: $SSH_KNOWN_HOSTS_FILE"
+    exit 1
+fi
+ssh_host_options=(
+    -o "StrictHostKeyChecking=$SSH_STRICT_HOST_KEY_CHECKING"
+    -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
+)
+
+# Multiplexing keeps one authenticated transport alive. Later SSH/SCP commands
+# open lightweight channels over it instead of repeating a full handshake.
+ssh_control_options=()
+if [[ "$SSH_MULTIPLEXING" == true ]]; then
+    SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-$CREDENTIALS_DIR/ssh-control}"
+    if ! mkdir -p "$SSH_CONTROL_DIR" || ! chmod 700 "$SSH_CONTROL_DIR"; then
+        log "SSH control directory is not writable: $SSH_CONTROL_DIR"
+        exit 1
+    fi
+    ssh_control_options=(
+        -o ControlMaster=auto
+        -o ControlPersist="$SSH_CONTROL_PERSIST"
+        -o ControlPath="$SSH_CONTROL_DIR/%C"
+    )
+fi
+
 # Run one command on the remote machine using the requested private key.
 remote() {
     local key="$1"
@@ -165,6 +179,7 @@ working_key=""
 key_update_needed=true
 recovery_pid=""
 recovery_started_epoch=0
+recovery_reason=""
 last_deploy_check=0
 last_resource_alert=0
 last_recovery_alert=0
@@ -172,6 +187,9 @@ previous_cpu_total=""
 previous_cpu_idle=""
 previous_cpu_usage_usec=""
 previous_cpu_sample_ns=""
+ssh_outage_notified=false
+app_down_notified=false
+remote_failure_notified=false
 
 [[ "$RESOURCE_LOG_FILE" = /* ]] || RESOURCE_LOG_FILE="$SCRIPT_DIR/../$RESOURCE_LOG_FILE"
 mkdir -p "$(dirname -- "$RESOURCE_LOG_FILE")"
@@ -193,6 +211,11 @@ wait_for_ssh() {
             else
                 log "SSH connected using the bootstrap key."
             fi
+            if [[ "$ssh_outage_notified" == true ]]; then
+                send_discord_notification \
+                    "OSMS server connectivity restored: $WATCH_TARGET" || true
+                ssh_outage_notified=false
+            fi
             return
         fi
 
@@ -200,6 +223,11 @@ wait_for_ssh() {
             if ssh_error="$(remote "$bootstrap_key" true 2>&1)"; then
                 working_key="$bootstrap_key"
                 log "Stable key was unavailable; SSH connected using the bootstrap key."
+                if [[ "$ssh_outage_notified" == true ]]; then
+                    send_discord_notification \
+                        "OSMS server connectivity restored: $WATCH_TARGET" || true
+                    ssh_outage_notified=false
+                fi
                 return
             fi
         fi
@@ -210,6 +238,21 @@ wait_for_ssh() {
         if (( retry_count == 1 || retry_count % SSH_DIAGNOSTIC_INTERVAL == 0 )); then
             ssh_error="$(tail -n 1 <<< "$ssh_error")"
             [[ -n "$ssh_error" ]] && log "SSH detail: $ssh_error"
+        fi
+        if [[ "$DISCORD_NOTIFY_SERVER_STATE" == true && \
+              "$ssh_outage_notified" == false ]] && \
+           (( retry_count >= SERVER_DOWN_NOTIFY_AFTER )); then
+            if [[ "$ssh_error" == *"Permission denied"* ]]; then
+                send_discord_notification \
+                    "OSMS SSH authentication failed for $WATCH_TARGET; the server answered but neither configured key was accepted." || true
+            elif [[ "$ssh_error" == *"Host key verification failed"* ]]; then
+                send_discord_notification \
+                    "OSMS SSH host verification failed for $WATCH_TARGET." || true
+            else
+                send_discord_notification \
+                    "OSMS server is unavailable over SSH: $WATCH_TARGET" || true
+            fi
+            ssh_outage_notified=true
         fi
         sleep "$SSH_RETRY_INTERVAL"
     done
@@ -264,6 +307,7 @@ fi
 
 running_revision=""
 latest_revision=""
+running_model=""
 if [[ "$CHECK_REVISION" == true ]]; then
     app="$HOME/OverSmart-Math-Solver"
     running_revision="$(cat "$app/.runtime/app.commit" 2>/dev/null || printf missing)"
@@ -271,6 +315,17 @@ if [[ "$CHECK_REVISION" == true ]]; then
         git -C "$app" ls-remote origin refs/heads/main 2>/dev/null |
             awk 'NR == 1 { print $1 }'
     )"
+    running_model="$(cat "$app/.runtime/app.model" 2>/dev/null || true)"
+    if [[ -z "$running_model" ]]; then
+        app_pid="$(cat "$app/.runtime/app.pid" 2>/dev/null || true)"
+        if [[ "$app_pid" =~ ^[0-9]+$ && -r "/proc/$app_pid/environ" ]]; then
+            running_model="$(
+                tr '\0' '\n' < "/proc/$app_pid/environ" |
+                    sed -n 's/^OSMS_MODEL_NAME=//p' |
+                    head -n 1
+            )"
+        fi
+    fi
 fi
 
 read -r cpu_total cpu_idle < <(
@@ -320,6 +375,7 @@ printf 'remote_status=%s\n' "$remote_status"
 printf 'health_signal=%s\n' "$health_signal"
 printf 'running_revision=%s\n' "$running_revision"
 printf 'latest_revision=%s\n' "$latest_revision"
+printf 'running_model=%s\n' "$running_model"
 printf 'cpu_total=%s\n' "$cpu_total"
 printf 'cpu_idle=%s\n' "$cpu_idle"
 printf 'cpu_usage_usec=%s\n' "$cpu_usage_usec"
@@ -341,6 +397,7 @@ collect_probe() {
     health_signal=missing
     running_revision=""
     latest_revision=""
+    running_model=""
     cpu_total=""
     cpu_idle=""
     cpu_usage_usec=unavailable
@@ -360,6 +417,7 @@ collect_probe() {
             health_signal) health_signal="$value" ;;
             running_revision) running_revision="$value" ;;
             latest_revision) latest_revision="$value" ;;
+            running_model) running_model="$value" ;;
             cpu_total) cpu_total="$value" ;;
             cpu_idle) cpu_idle="$value" ;;
             cpu_usage_usec) cpu_usage_usec="$value" ;;
@@ -442,6 +500,32 @@ record_resources() {
     fi
 }
 
+notify_remote_state_changes() {
+    if [[ "$DISCORD_NOTIFY_APP_STATE" == true ]]; then
+        if [[ "$health_signal" == "missing" && "$app_down_notified" == false ]]; then
+            send_discord_notification \
+                "OSMS app is down on $WATCH_TARGET; recovery will start or is already running." || true
+            app_down_notified=true
+        elif [[ "$health_signal" == "healthy" && "$app_down_notified" == true ]]; then
+            send_discord_notification \
+                "OSMS app is healthy again on $WATCH_TARGET." || true
+            app_down_notified=false
+        fi
+    fi
+
+    if [[ "$DISCORD_NOTIFY_SERVER_STATE" == true ]]; then
+        if [[ "$remote_status" == "failed" && "$remote_failure_notified" == false ]]; then
+            send_discord_notification \
+                "OSMS remote status is failed on $WATCH_TARGET." || true
+            remote_failure_notified=true
+        elif [[ "$remote_status" == "healthy" && "$remote_failure_notified" == true ]]; then
+            send_discord_notification \
+                "OSMS remote status recovered to healthy on $WATCH_TARGET." || true
+            remote_failure_notified=false
+        fi
+    fi
+}
+
 mark_ssh_lost() {
     key_update_needed=true
     working_key=""
@@ -516,6 +600,7 @@ run_recovery() {
 
 start_recovery() {
     recovery_started_epoch="$(date +%s)"
+    recovery_reason="${2:-application recovery}"
     run_recovery "$1" &
     recovery_pid=$!
 }
@@ -537,6 +622,7 @@ while true; do
                 continue
             fi
             record_resources
+            notify_remote_state_changes
             log "Setup is running; status: ${remote_status:-missing}; health: ${health_signal:-missing}"
             sleep "$SETUP_CHECK_INTERVAL"
             continue
@@ -544,6 +630,10 @@ while true; do
 
         if wait "$recovery_pid"; then
             log "Recovery completed in $(( $(date +%s) - recovery_started_epoch )) seconds."
+            if [[ "$DISCORD_NOTIFY_RECOVERY" == true ]]; then
+                send_discord_notification \
+                    "OSMS ${recovery_reason} completed on $WATCH_TARGET in $(( $(date +%s) - recovery_started_epoch )) seconds." || true
+            fi
         else
             log "Recovery failed after $(( $(date +%s) - recovery_started_epoch )) seconds; returning to $CHECK_INTERVAL-second checks."
             now="$(date +%s)"
@@ -568,11 +658,12 @@ while true; do
         continue
     fi
     record_resources
+    notify_remote_state_changes
 
     # Writing build-repo to the remote status file requests a clean checkout.
     if [[ "$remote_status" == "build-repo" ]]; then
         log "Clean repository rebuild requested."
-        start_recovery true
+        start_recovery true "clean repository rebuild"
         sleep "$SETUP_CHECK_INTERVAL"
         continue
     fi
@@ -587,7 +678,20 @@ while true; do
             last_deploy_check="$now"
             if [[ -n "$latest_revision" && "$running_revision" != "$latest_revision" ]]; then
                 log "New commit detected: ${running_revision:-missing} -> $latest_revision; deploying."
-                start_recovery false
+                if [[ "$DISCORD_NOTIFY_REPO_UPDATES" == true ]]; then
+                    send_discord_notification \
+                        "OSMS repository update detected on $WATCH_TARGET: ${running_revision:-missing} -> $latest_revision. Deploying now." || true
+                fi
+                start_recovery false "repository deployment"
+                sleep "$SETUP_CHECK_INTERVAL"
+                continue
+            elif [[ -z "$running_model" || "$running_model" != "$OSMS_MODEL_NAME" ]]; then
+                log "Model configuration changed: ${running_model:-missing} -> $OSMS_MODEL_NAME; redeploying."
+                if [[ "$DISCORD_NOTIFY_REPO_UPDATES" == true ]]; then
+                    send_discord_notification \
+                        "OSMS model configuration changed on $WATCH_TARGET: ${running_model:-missing} -> $OSMS_MODEL_NAME. Redeploying now." || true
+                fi
+                start_recovery false "model configuration deployment"
                 sleep "$SETUP_CHECK_INTERVAL"
                 continue
             fi
@@ -596,7 +700,7 @@ while true; do
         log "Application process is busy but still running; recovery skipped."
     else
         log "Application is unhealthy; running recovery."
-        start_recovery false
+        start_recovery false "application recovery"
         sleep "$SETUP_CHECK_INTERVAL"
         continue
     fi
