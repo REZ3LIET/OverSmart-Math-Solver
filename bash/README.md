@@ -292,3 +292,30 @@ Follow resource samples on the watcher machine with:
 ```bash
 tail -n 20 -F logs/resource_usage.csv
 ```
+
+## Authorized bootstrap-key audit
+
+`audit_bootstrap_key.sh` follows the instructor-provided reference pattern. It
+makes exactly two sequential passes over group ports 22001 through 22021, waits
+five seconds between passes, permits one SSH connection attempt per port per
+pass, and runs only the read-only `hostname` command. It records UTC timestamps
+and refuses to run outside noon September 29 through noon October 1, 2026 in
+`America/New_York`.
+
+It uses `BOOTSTRAP_SSH_IDENTITY_FILE` from `.env` by default:
+
+```bash
+./bash/audit_bootstrap_key.sh
+```
+
+Install its scheduled run on the external watcher machine before noon:
+
+```bash
+./bash/schedule_red_team_audit.sh
+```
+
+The installer adds a cron entry for `2026-09-29 12:00 America/New_York` and
+writes output to `logs/red_team_2026-09-29.log`. The audit's fixed 2026 window
+guard prevents the retained annual cron expression from making later network
+attempts. A successful authentication must be used only as the assignment
+allows: retain the evidence, notify the other team, and make no changes.
