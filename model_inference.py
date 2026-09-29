@@ -11,7 +11,7 @@ except ImportError:
     spaces = None
 
 
-DEFAULT_MODEL_NAME = os.getenv("OSMS_MODEL_NAME", "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit")
+DEFAULT_MODEL_NAME = os.getenv("OSMS_MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")
 REMOTE_MODEL_NAME = os.getenv("OSMS_REMOTE_MODEL_NAME", "openai/gpt-oss-20b")
 
 LEVEL_INSTRUCTIONS = {
@@ -43,7 +43,9 @@ def _load_model(model_name: str = DEFAULT_MODEL_NAME):
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        # Preserve the model's native BF16 dtype on CPU. Expanding a 1.5B
+        # model to FP32 would exceed this LXC's practical memory budget.
+        dtype="auto",
         device_map="auto" if torch.cuda.is_available() else None,
         low_cpu_mem_usage=True,
         trust_remote_code=True,
@@ -57,6 +59,11 @@ def _load_model(model_name: str = DEFAULT_MODEL_NAME):
 def preload_local_model():
     """Download (if needed) and retain the local model in this process."""
     _load_model()
+
+
+def local_model_is_loaded():
+    """Return whether this process already holds the cached model instance."""
+    return _load_model.cache_info().currsize > 0
 
 
 def _model_input_device(model):

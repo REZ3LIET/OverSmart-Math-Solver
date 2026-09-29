@@ -17,8 +17,9 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REBUILD_REPO="${FORCE_REBUILD_REPO:-false}"
 DEPLOY_CACHE_ARCHIVE="${DEPLOY_CACHE_ARCHIVE:-}"
 DEPLOY_CACHE_CHECKSUM="${DEPLOY_CACHE_CHECKSUM:-}"
-OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit}"
+OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
 OSMS_PRELOAD_LOCAL_MODEL="${OSMS_PRELOAD_LOCAL_MODEL:-true}"
+PYTORCH_CPU_INDEX_URL="${PYTORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
 
 STATE_DIR="$HOME/.check"
 mkdir -p "$STATE_DIR"
@@ -126,6 +127,35 @@ if [[ ! -x .venv/bin/python ]] || ! .venv/bin/python -m pip --version >/dev/null
     "$PYTHON_BIN" -m venv --clear .venv
 fi
 
+cpu_torch_ready() {
+    .venv/bin/python - <<'PY' >/dev/null 2>&1
+import torch
+
+raise SystemExit(0 if torch.version.cuda is None else 1)
+PY
+}
+
+# The LXC has no GPU. Replace a missing/CUDA PyTorch build and remove packages
+# that only provide CUDA runtimes. Installing torch separately lets the rest of
+# the application continue to use the normal Python package index.
+if ! cpu_torch_ready; then
+    printf 'build-dependencies\n' > "$STATE_DIR/status"
+    log "Installing CPU-only PyTorch."
+    mapfile -t cuda_packages < <(
+        .venv/bin/python -m pip list --format=freeze 2>/dev/null |
+            awk -F= 'tolower($1) ~ /^(nvidia-|cuda-|triton$|bitsandbytes$)/ { print $1 }'
+    )
+    if (( ${#cuda_packages[@]} > 0 )); then
+        .venv/bin/python -m pip uninstall -y "${cuda_packages[@]}"
+    fi
+    .venv/bin/python -m pip install \
+        --disable-pip-version-check \
+        --upgrade \
+        --force-reinstall \
+        --index-url "$PYTORCH_CPU_INDEX_URL" \
+        torch
+fi
+
 requirements_hash="$(sha256sum requirements.txt | awk '{print $1}')"
 installed_hash="$(cat .venv/.requirements.sha256 2>/dev/null || true)"
 if [[ "$requirements_hash" != "$installed_hash" ]]; then
@@ -133,6 +163,11 @@ if [[ "$requirements_hash" != "$installed_hash" ]]; then
     log "Installing Python dependencies."
     .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
     printf '%s\n' "$requirements_hash" > .venv/.requirements.sha256
+fi
+
+if ! cpu_torch_ready; then
+    log "Dependency installation replaced CPU-only PyTorch with a CUDA build."
+    exit 1
 fi
 
 # Download the complete local fallback model during recovery. Hugging Face
@@ -147,6 +182,14 @@ from model_inference import DEFAULT_MODEL_NAME
 snapshot_download(DEFAULT_MODEL_NAME)
 print(f"Local model snapshot is ready: {DEFAULT_MODEL_NAME}", flush=True)
 PY
+
+# Remove only the superseded model cache after the replacement is complete.
+legacy_model_cache="$HOME/.cache/huggingface/hub/models--unsloth--Qwen2.5-Coder-3B-Instruct-bnb-4bit"
+if [[ "$OSMS_MODEL_NAME" != "unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit" && \
+      -d "$legacy_model_cache" ]]; then
+    log "Removing superseded 3B model cache."
+    rm -rf -- "$legacy_model_cache"
+fi
 
 # Keep the PID and application output together in a disposable runtime folder.
 mkdir -p .runtime

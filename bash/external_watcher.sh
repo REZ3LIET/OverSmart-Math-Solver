@@ -32,6 +32,7 @@ DEFAULT_STATUS_COMMAND='cat "$HOME/.check/status" 2>/dev/null || printf missing'
 REMOTE_STATUS_COMMAND="${REMOTE_STATUS_COMMAND:-$DEFAULT_STATUS_COMMAND}"
 SSH_BIN="${SSH_BIN:-ssh}"
 SCP_BIN="${SCP_BIN:-scp}"
+CURL_BIN="${CURL_BIN:-curl}"
 SSH_MULTIPLEXING="${SSH_MULTIPLEXING:-true}"
 SSH_CONTROL_PERSIST="${SSH_CONTROL_PERSIST:-60}"
 CPU_THRESHOLD="${CPU_THRESHOLD:-80}"
@@ -39,8 +40,11 @@ MEMORY_THRESHOLD="${MEMORY_THRESHOLD:-80}"
 GPU_THRESHOLD="${GPU_THRESHOLD:-80}"
 GPU_MEMORY_THRESHOLD="${GPU_MEMORY_THRESHOLD:-80}"
 RESOURCE_ALERT_COOLDOWN="${RESOURCE_ALERT_COOLDOWN:-60}"
+RECOVERY_ALERT_COOLDOWN="${RECOVERY_ALERT_COOLDOWN:-300}"
 RESOURCE_LOG_FILE="${RESOURCE_LOG_FILE:-$SCRIPT_DIR/../logs/resource_usage.csv}"
-OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_USERNAME="${DISCORD_USERNAME:-OSMS Watcher}"
+OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
 OSMS_PRELOAD_LOCAL_MODEL="${OSMS_PRELOAD_LOCAL_MODEL:-true}"
 
 # Keep watcher host keys separate from the user's normal SSH configuration.
@@ -77,6 +81,54 @@ KEY_UPDATE_SCRIPT="$SCRIPT_DIR/update_ssh_key.sh"
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
+
+send_discord_notification() {
+    local message="$1"
+    local payload
+
+    [[ -n "$DISCORD_WEBHOOK_URL" ]] || return 0
+    if ! payload="$(python3 - "$message" "$DISCORD_USERNAME" <<'PY'
+import json
+import sys
+
+print(json.dumps({"content": sys.argv[1][:1900], "username": sys.argv[2]}))
+PY
+    )"; then
+        log "Discord notification encoding failed."
+        return 1
+    fi
+
+    # Feed the URL through curl's stdin config so the secret is not exposed in
+    # the process command line. Discord webhook URLs contain URL-safe text.
+    if ! printf 'url = "%s"\n' "$DISCORD_WEBHOOK_URL" | "$CURL_BIN" \
+        --config - \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        -H 'Content-Type: application/json' \
+        --data-binary "$payload" \
+        >/dev/null
+    then
+        log "Discord notification delivery failed."
+        return 1
+    fi
+}
+
+if [[ "${1:-}" == "--test-discord" ]]; then
+    if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+        log "DISCORD_WEBHOOK_URL is not configured."
+        exit 1
+    fi
+    if send_discord_notification "OSMS watcher test notification for $WATCH_TARGET"; then
+        log "Discord test notification delivered."
+        exit 0
+    fi
+    exit 1
+elif (( $# > 0 )); then
+    log "Unknown argument: $1"
+    exit 2
+fi
 
 # Run one command on the remote machine using the requested private key.
 remote() {
@@ -115,6 +167,7 @@ recovery_pid=""
 recovery_started_epoch=0
 last_deploy_check=0
 last_resource_alert=0
+last_recovery_alert=0
 previous_cpu_total=""
 previous_cpu_idle=""
 previous_cpu_usage_usec=""
@@ -383,6 +436,8 @@ record_resources() {
     now="$(date +%s)"
     if (( ${#warnings[@]} > 0 && now - last_resource_alert >= RESOURCE_ALERT_COOLDOWN )); then
         log "RESOURCE WARNING: ${warnings[*]}"
+        send_discord_notification \
+            "OSMS resource warning on $WATCH_TARGET: ${warnings[*]}" || true
         last_resource_alert="$now"
     fi
 }
@@ -491,6 +546,12 @@ while true; do
             log "Recovery completed in $(( $(date +%s) - recovery_started_epoch )) seconds."
         else
             log "Recovery failed after $(( $(date +%s) - recovery_started_epoch )) seconds; returning to $CHECK_INTERVAL-second checks."
+            now="$(date +%s)"
+            if (( now - last_recovery_alert >= RECOVERY_ALERT_COOLDOWN )); then
+                send_discord_notification \
+                    "OSMS recovery failed on $WATCH_TARGET; the watcher will retry." || true
+                last_recovery_alert="$now"
+            fi
         fi
         recovery_pid=""
         sleep "$CHECK_INTERVAL"

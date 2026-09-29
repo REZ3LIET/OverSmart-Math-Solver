@@ -17,6 +17,8 @@ SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-5}"
 CREDENTIALS_DIR="${CREDENTIALS_DIR:-$HOME/.ssh/osms-recovery}"
 SSH_BIN="${SSH_BIN:-ssh}"
 SCP_BIN="${SCP_BIN:-scp}"
+OSMS_MODEL_NAME="${OSMS_MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}"
+model_cache_relative=".cache/huggingface/hub/models--${OSMS_MODEL_NAME//\//--}"
 
 safe_target="${WATCH_TARGET//[^A-Za-z0-9_.-]/_}"
 SSH_IDENTITY_FILE="${SSH_IDENTITY_FILE:-$CREDENTIALS_DIR/${safe_target}_ed25519}"
@@ -45,12 +47,13 @@ ssh_options=(
 )
 
 echo "Building deployment cache on $WATCH_TARGET."
-"$SSH_BIN" "${ssh_options[@]}" "$WATCH_TARGET" "REMOTE_ARCHIVE=$remote_archive bash -s" <<'REMOTE'
+printf -v quoted_model_cache_relative '%q' "$model_cache_relative"
+"$SSH_BIN" "${ssh_options[@]}" "$WATCH_TARGET" \
+    "REMOTE_ARCHIVE=$remote_archive MODEL_CACHE_RELATIVE=$quoted_model_cache_relative bash -s" <<'REMOTE'
 set -euo pipefail
 
 app_venv="$HOME/OverSmart-Math-Solver/.venv"
-model_cache="$HOME/.cache/huggingface/hub/models--unsloth--Qwen2.5-Coder-3B-Instruct-bnb-4bit"
-shared_blobs="$HOME/.cache/huggingface/hub/blobs"
+model_cache="$HOME/$MODEL_CACHE_RELATIVE"
 
 [[ -x "$app_venv/bin/python" ]] || {
     echo "Remote virtual environment is missing." >&2
@@ -69,16 +72,10 @@ find -L "$model_cache/snapshots" -type f -name model.safetensors -print -quit | 
         echo "Remote model weights have a missing symlink target." >&2
         exit 1
     }
-[[ -d "$shared_blobs" ]] || {
-    echo "Remote shared Hugging Face blob cache is missing." >&2
-    exit 1
-}
-
 rm -f -- "$REMOTE_ARCHIVE"
 tar -C "$HOME" -cf "$REMOTE_ARCHIVE" \
     OverSmart-Math-Solver/.venv \
-    .cache/huggingface/hub/models--unsloth--Qwen2.5-Coder-3B-Instruct-bnb-4bit \
-    .cache/huggingface/hub/blobs
+    "$MODEL_CACHE_RELATIVE"
 REMOTE
 
 echo "Copying deployment cache to $DEPLOY_CACHE_ARCHIVE."

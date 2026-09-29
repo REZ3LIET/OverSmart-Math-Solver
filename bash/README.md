@@ -52,7 +52,8 @@ It:
 2. Installs missing Ubuntu/Debian prerequisites, including `python3-venv` and
    `python3-pip`.
 3. Creates or repairs `.venv` when its Python or pip is unavailable.
-4. Installs dependencies only when `requirements.txt` changes.
+4. Ensures PyTorch is the CPU-only build, removes CUDA-only packages, and
+   installs application dependencies when `requirements.txt` changes.
 5. Downloads and verifies the configured local Hugging Face model. Existing
    cached files are reused.
 6. Stops the previous recorded app process.
@@ -283,9 +284,29 @@ GPU_MEMORY_THRESHOLD=80
 RESOURCE_ALERT_COOLDOWN=60
 ```
 
-Warnings currently appear in watcher output and are limited to one per cooldown
-period. Discord delivery and automated overload reactions remain explicit TODOs.
-An unavailable GPU is recorded as `unavailable`, not as zero utilization.
+Warnings appear in watcher output and are limited to one per cooldown period.
+When `DISCORD_WEBHOOK_URL` is configured, the same rate-limited warning is sent
+to Discord. Recovery failures are separately limited by
+`RECOVERY_ALERT_COOLDOWN`. The webhook URL is never printed. An unavailable GPU
+is recorded as `unavailable`, not as zero utilization.
+
+Configure Discord in `.env`:
+
+```text
+DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
+DISCORD_USERNAME='OSMS Watcher'
+```
+
+Send one test notification without starting the monitoring loop:
+
+```bash
+./bash/external_watcher.sh --test-discord
+```
+
+The standalone deployment defaults to `Qwen/Qwen2.5-0.5B-Instruct`, CPU-only
+PyTorch, and 128 maximum new tokens. Gradio displays model readiness when the
+page opens and shows progress messages for remote inference, local loading,
+CPU generation, and fallback.
 
 Follow resource samples on the watcher machine with:
 

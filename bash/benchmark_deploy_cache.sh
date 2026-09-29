@@ -78,6 +78,9 @@ venv_seconds="$(seconds_since "$stage_started")"
 
 stage_started="$(date +%s.%N)"
 "$fresh/repo/.venv/bin/python" -m pip install \
+    --disable-pip-version-check --quiet \
+    --index-url https://download.pytorch.org/whl/cpu torch
+"$fresh/repo/.venv/bin/python" -m pip install \
     --disable-pip-version-check --no-cache-dir --quiet \
     -r "$fresh/repo/requirements.txt"
 pip_seconds="$(seconds_since "$stage_started")"
@@ -86,7 +89,7 @@ stage_started="$(date +%s.%N)"
 HF_HOME="$fresh/huggingface" "$fresh/repo/.venv/bin/python" - <<'PY'
 from huggingface_hub import snapshot_download
 
-snapshot_download("unsloth/Qwen2.5-Coder-3B-Instruct-bnb-4bit")
+snapshot_download("Qwen/Qwen2.5-0.5B-Instruct")
 PY
 model_seconds="$(seconds_since "$stage_started")"
 total_seconds="$(seconds_since "$total_started")"
@@ -120,7 +123,7 @@ started="$(date +%s.%N)"
 tar -C "$cached" -xf "$REMOTE_ARCHIVE"
 "$cached/OverSmart-Math-Solver/.venv/bin/python" -m pip --version >/dev/null
 find -L \
-    "$cached/.cache/huggingface/hub/models--unsloth--Qwen2.5-Coder-3B-Instruct-bnb-4bit/snapshots" \
+    "$cached/.cache/huggingface/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots" \
     -type f -name model.safetensors -print -quit | grep -q .
 awk -v start="$started" -v end="$(date +%s.%N)" 'BEGIN { printf "%.3f", end - start }'
 REMOTE_EXTRACT

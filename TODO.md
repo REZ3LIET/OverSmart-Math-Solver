@@ -12,9 +12,8 @@
 - [x] Treat a live but temporarily unresponsive inference process as `busy`
   instead of immediately destroying it.
 - [x] Use PID-file/`nohup` supervision for the current limited-permission test.
-- [x] Confirm the configured local model is downloaded completely. It currently
-  occupies about 2 GB at
-  `~/.cache/huggingface/hub/models--unsloth--Qwen2.5-Coder-3B-Instruct-bnb-4bit`.
+- [x] Confirm the original 3B local model downloaded and generated successfully;
+  its measured baseline was 0.26 tokens/s and 3904 MB peak process memory.
 - [x] Add an external deployment-cache archive containing `.venv` and the local
   model, with checksum-based SCP and restore on a fresh LXC.
 - [x] Add a lightweight `/healthz` endpoint and log total recovery duration.
@@ -26,6 +25,12 @@
   rate-limited warnings when configured thresholds are exceeded.
 - [x] Confirm successful local-model generation. The remote log contains
   completed generated responses from the configured model.
+- [x] Add Gradio model-readiness and request-stage progress feedback.
+- [x] Add rate-limited Discord webhook alerts for resource thresholds and
+  repeated recovery failures without logging the webhook URL.
+- [x] Replace the CUDA-oriented dependency path with CPU-only PyTorch, remove
+  `bitsandbytes`/CUDA runtime packages, and select the smaller
+  `Qwen/Qwen2.5-0.5B-Instruct` model with a 128-token default.
 
 ## Partially completed
 
@@ -33,8 +38,8 @@
   and model downloads, but is slower on this LXC. Investigate a smaller
   dependency set, a host-level prebuilt image, or an archive that can be used
   without extracting 7.7 GB.
-- [ ] Add clear UI/status feedback while the local model downloads, loads, or
-  performs slow CPU inference.
+- [ ] Deploy and benchmark the new 0.5B CPU configuration against the measured
+  3B baseline (116.79 seconds, 0.26 tokens/s, and 3904 MB peak memory).
 
 ## Open
 
@@ -43,11 +48,6 @@
   a new SSH host key.
 - [ ] Supply application secrets during recovery without committing them or
   printing them in logs.
-- [ ] Add notifications for recovery attempts that continue to fail.
-- [ ] Send rate-limited Discord webhook notifications when a resource threshold
-  is exceeded. Keep the webhook URL outside Git and redact it from logs.
 - [ ] Add an overload reaction policy: switch to a smaller model, reduce token
   limits/concurrency, queue or reject new work, and show a near-capacity message
   in the UI. Add hysteresis so behavior does not flap around 80%.
-- [ ] Remove unnecessary CUDA packages from the CPU-only LXC environment and
-  benchmark a smaller CPU-oriented model and lower default token limit.

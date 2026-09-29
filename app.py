@@ -8,6 +8,7 @@ import uvicorn
 from model_inference import (
     generate_api_math_representation,
     generate_math_representation,
+    local_model_is_loaded,
     preload_local_model,
 )
 
@@ -64,72 +65,77 @@ def generate_response(
     temperature,
     hf_access_token="",
     hf_token: gr.OAuthToken = None,
+    progress=gr.Progress(),
 ):
     prompt = prompt or ""
     if not prompt.strip():
         return "", ""
 
     if not use_local_model:
+        progress(0.05, desc="Checking remote model credentials")
         token = (
             getattr(hf_token, "token", None)
             or (hf_access_token or "").strip()
             or SERVER_HF_TOKEN
         )
         if not token:
-            # Standalone deployments do not have Hugging Face OAuth. Fall back
-            # locally instead of preventing the user from running the app.
-            return generate_response(
-                prompt,
-                generation_level,
-                True,
-                max_new_tokens,
-                temperature,
-                hf_access_token,
-                hf_token,
-            )
-
-        try:
-            response, metrics = generate_api_math_representation(
-                prompt=prompt,
-                generation_level=generation_level,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                hf_token=token,
-            )
-        except Exception as remote_exc:
-            remote_trace = traceback.format_exc()
-            print("Remote inference failed; trying the local model.", flush=True)
-            print(remote_trace, flush=True)
-
+            progress(0.10, desc="No remote token; switching to the local model")
+            use_local_model = True
+        else:
             try:
-                response, metrics = generate_math_representation(
+                progress(0.20, desc="Remote model is generating")
+                response, metrics = generate_api_math_representation(
                     prompt=prompt,
                     generation_level=generation_level,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
+                    hf_token=token,
                 )
-            except Exception as local_exc:
-                local_trace = traceback.format_exc()
-                print("Local fallback inference failed.", flush=True)
-                print(local_trace, flush=True)
-                return "", (
-                    "### Inference Failed\n\n"
-                    "Both the remote model and the local fallback failed.\n\n"
-                    f"- **Remote:** {type(remote_exc).__name__}: {remote_exc}\n"
-                    f"- **Local:** {type(local_exc).__name__}: {local_exc}"
+            except Exception as remote_exc:
+                remote_trace = traceback.format_exc()
+                print("Remote inference failed; trying the local model.", flush=True)
+                print(remote_trace, flush=True)
+                progress(0.35, desc="Remote failed; preparing local fallback")
+
+                try:
+                    response, metrics = generate_math_representation(
+                        prompt=prompt,
+                        generation_level=generation_level,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                    )
+                except Exception as local_exc:
+                    local_trace = traceback.format_exc()
+                    print("Local fallback inference failed.", flush=True)
+                    print(local_trace, flush=True)
+                    return "", (
+                        "### Inference Failed\n\n"
+                        "Both the remote model and the local fallback failed.\n\n"
+                        f"- **Remote:** {type(remote_exc).__name__}: {remote_exc}\n"
+                        f"- **Local:** {type(local_exc).__name__}: {local_exc}"
+                    )
+
+                progress(1.0, desc="Local fallback completed")
+                print(f"generated local fallback response: {response}")
+                fallback_notice = (
+                    "### Local Fallback Used\n\n"
+                    f"The remote model failed with `{type(remote_exc).__name__}`, "
+                    "so the request was completed by the local model.\n\n"
                 )
+                return response, fallback_notice + format_inference_report(metrics)
 
-            print(f"generated local fallback response: {response}")
-            fallback_notice = (
-                "### Local Fallback Used\n\n"
-                f"The remote model failed with `{type(remote_exc).__name__}`, "
-                "so the request was completed by the local model.\n\n"
-            )
-            return response, fallback_notice + format_inference_report(metrics)
+            progress(1.0, desc="Remote generation completed")
+            print(f"generated response: {response}")
+            return response, format_inference_report(metrics)
 
-        print(f"generated response: {response}")
-        return response, format_inference_report(metrics)
-
+    progress(
+        0.15,
+        desc=(
+            "Local model is ready; generating on CPU"
+            if local_model_is_loaded()
+            else "Downloading/loading the local model"
+        ),
+    )
     try:
         response, metrics = generate_math_representation(
             prompt=prompt,
@@ -146,8 +152,15 @@ def generate_response(
             f"```text\n{trace}\n```"
         )
 
+    progress(1.0, desc="Local generation completed")
     print(f"generated response: {response}")
     return response, format_inference_report(metrics)
+
+
+def local_model_status():
+    if local_model_is_loaded():
+        return "**Local fallback:** ready in memory (CPU mode)."
+    return "**Local fallback:** not loaded yet; the first local request will prepare it."
 
 
 EXAMPLE_PROMPTS = [
@@ -198,6 +211,8 @@ with gr.Blocks(title="OSMS") as demo:
         value="Performance metrics will appear after generation.",
     )
 
+    local_status = gr.Markdown("Checking local model readiness…")
+
     # -----------------------------------------------------
     # Example prompts
     # -----------------------------------------------------
@@ -223,8 +238,8 @@ with gr.Blocks(title="OSMS") as demo:
 
         max_new_tokens = gr.Slider(
             minimum=32,
-            maximum=2048,
-            value=512,
+            maximum=512,
+            value=128,
             step=32,
             label="Max New Tokens",
         )
@@ -238,7 +253,7 @@ with gr.Blocks(title="OSMS") as demo:
         )
 
         use_local_model = gr.Checkbox(
-            label="Use local ZeroGPU model",
+            label="Use local CPU model",
             value=not HF_OAUTH_ENABLED and not bool(SERVER_HF_TOKEN),
         )
 
@@ -266,6 +281,8 @@ with gr.Blocks(title="OSMS") as demo:
         inputs=generation_inputs,
         outputs=generation_outputs,
     )
+
+    demo.load(fn=local_model_status, outputs=local_status)
 
 
 # Standalone deployments mount Gradio beneath a small FastAPI parent. This
