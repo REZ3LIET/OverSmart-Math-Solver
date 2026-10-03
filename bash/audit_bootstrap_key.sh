@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
-# Authorized CS553 red-team exercise based on the instructor's reference code.
-# It makes exactly two finite passes over the 21 documented group ports, with
-# one SSH attempt per port per pass and no SSH-level retries.
+# Authorized CS553 check: two bounded passes using only the read-only hostname
+# command. The fixed window prevents this script from being reused later.
 
 set -u
 
@@ -17,8 +16,7 @@ AUDIT_CONNECT_TIMEOUT="${AUDIT_CONNECT_TIMEOUT:-3}"
 AUDIT_USER="${AUDIT_USER:-student-admin}"
 AUDIT_KEY="${AUDIT_KEY:-${BOOTSTRAP_SSH_IDENTITY_FILE:-}}"
 
-# Noon September 29 through noon October 1, 2026 in New York is 16:00 UTC
-# because New York is observing EDT (UTC-4) on these dates.
+# Noon September 29 through noon October 1, 2026 in New York (EDT/UTC-4).
 WINDOW_START_EPOCH=1790697600
 WINDOW_END_EPOCH=1790870400
 PASSES=2
@@ -31,24 +29,23 @@ if (( now < WINDOW_START_EPOCH || now >= WINDOW_END_EPOCH )); then
     exit 1
 fi
 
-if [[ -z "$AUDIT_KEY" ]]; then
+[[ -n "$AUDIT_KEY" ]] || {
     printf 'Set AUDIT_KEY or BOOTSTRAP_SSH_IDENTITY_FILE in .env.\n' >&2
     exit 1
-fi
+}
 [[ "$AUDIT_KEY" = /* ]] || AUDIT_KEY="$REPO_ROOT/$AUDIT_KEY"
-if [[ ! -r "$AUDIT_KEY" ]]; then
+[[ -r "$AUDIT_KEY" ]] || {
     printf 'Audit key is not readable: %s\n' "$AUDIT_KEY" >&2
     exit 1
-fi
+}
 
 accepted=0
 attempted=0
-
 printf 'Authorized CS553 red-team check started at %s UTC.\n' \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 printf 'Two passes; ports 22001-22021; five seconds between passes.\n\n'
 
-for pass in 1 2; do
+for (( pass = 1; pass <= PASSES; pass++ )); do
     printf 'Pass %d of %d\n' "$pass" "$PASSES"
 
     for group in {1..21}; do
@@ -57,8 +54,6 @@ for pass in 1 2; do
         printf '%s group=%02d port=%d: ' \
             "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$group" "$port"
 
-        # Match the instructor's read-only proof: authenticate and print only
-        # the remote hostname. No interactive shell or configuration changes.
         if ssh \
             -o BatchMode=yes \
             -o ConnectionAttempts=1 \

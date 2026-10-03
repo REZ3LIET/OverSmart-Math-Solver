@@ -23,17 +23,8 @@ CREDENTIALS_DIR="${CREDENTIALS_DIR:-$HOME/.ssh/osms-recovery}"
 SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
 SSH_KNOWN_HOSTS_FILE="${SSH_KNOWN_HOSTS_FILE:-$CREDENTIALS_DIR/known_hosts}"
 SSH_DIAGNOSTIC_INTERVAL="${SSH_DIAGNOSTIC_INTERVAL:-5}"
-DEPLOY_CACHE_ARCHIVE="${DEPLOY_CACHE_ARCHIVE:-}"
-USE_DEPLOY_CACHE="${USE_DEPLOY_CACHE:-false}"
-UPDATE_SSH_KEY_ON_FIRST_PING="${UPDATE_SSH_KEY_ON_FIRST_PING:-true}"
-DEFAULT_HEALTH_COMMAND='if curl --fail --silent --max-time 2 http://127.0.0.1:8015/healthz >/dev/null || curl --fail --silent --max-time 2 http://127.0.0.1:8015/ >/dev/null; then printf healthy; else pid=$(cat "$HOME/OverSmart-Math-Solver/.runtime/app.pid" 2>/dev/null || true); test -n "$pid" && kill -0 "$pid" 2>/dev/null && printf busy; fi'
-REMOTE_HEALTH_COMMAND="${REMOTE_HEALTH_COMMAND:-$DEFAULT_HEALTH_COMMAND}"
-DEFAULT_STATUS_COMMAND='cat "$HOME/.check/status" 2>/dev/null || printf missing'
-REMOTE_STATUS_COMMAND="${REMOTE_STATUS_COMMAND:-$DEFAULT_STATUS_COMMAND}"
 SSH_BIN="${SSH_BIN:-ssh}"
-SCP_BIN="${SCP_BIN:-scp}"
 CURL_BIN="${CURL_BIN:-curl}"
-SSH_MULTIPLEXING="${SSH_MULTIPLEXING:-true}"
 SSH_CONTROL_PERSIST="${SSH_CONTROL_PERSIST:-60}"
 CPU_THRESHOLD="${CPU_THRESHOLD:-80}"
 MEMORY_THRESHOLD="${MEMORY_THRESHOLD:-80}"
@@ -130,19 +121,16 @@ ssh_host_options=(
 
 # Multiplexing keeps one authenticated transport alive. Later SSH/SCP commands
 # open lightweight channels over it instead of repeating a full handshake.
-ssh_control_options=()
-if [[ "$SSH_MULTIPLEXING" == true ]]; then
-    SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-$CREDENTIALS_DIR/ssh-control}"
-    if ! mkdir -p "$SSH_CONTROL_DIR" || ! chmod 700 "$SSH_CONTROL_DIR"; then
-        log "SSH control directory is not writable: $SSH_CONTROL_DIR"
-        exit 1
-    fi
-    ssh_control_options=(
-        -o ControlMaster=auto
-        -o ControlPersist="$SSH_CONTROL_PERSIST"
-        -o ControlPath="$SSH_CONTROL_DIR/%C"
-    )
+SSH_CONTROL_DIR="${SSH_CONTROL_DIR:-$CREDENTIALS_DIR/ssh-control}"
+if ! mkdir -p "$SSH_CONTROL_DIR" || ! chmod 700 "$SSH_CONTROL_DIR"; then
+    log "SSH control directory is not writable: $SSH_CONTROL_DIR"
+    exit 1
 fi
+ssh_control_options=(
+    -o ControlMaster=auto
+    -o ControlPersist="$SSH_CONTROL_PERSIST"
+    -o ControlPath="$SSH_CONTROL_DIR/%C"
+)
 
 # Run one command on the remote machine using the requested private key.
 remote() {
@@ -202,27 +190,21 @@ fi
 wait_for_ssh() {
     local retry_count=0
     local ssh_error=""
+    local candidate label
+    local -a candidates
 
     while true; do
-        if ssh_error="$(remote "$active_key" true 2>&1)"; then
-            working_key="$active_key"
-            if [[ "$working_key" == "$stable_key" ]]; then
-                log "SSH connected using the stable key."
-            else
-                log "SSH connected using the bootstrap key."
-            fi
-            if [[ "$ssh_outage_notified" == true ]]; then
-                send_discord_notification \
-                    "OSMS server connectivity restored: $WATCH_TARGET" || true
-                ssh_outage_notified=false
-            fi
-            return
+        candidates=("$active_key")
+        if [[ "$bootstrap_key" != "$active_key" && -r "$bootstrap_key" ]]; then
+            candidates+=("$bootstrap_key")
         fi
 
-        if [[ "$bootstrap_key" != "$active_key" && -r "$bootstrap_key" ]]; then
-            if ssh_error="$(remote "$bootstrap_key" true 2>&1)"; then
-                working_key="$bootstrap_key"
-                log "Stable key was unavailable; SSH connected using the bootstrap key."
+        for candidate in "${candidates[@]}"; do
+            if ssh_error="$(remote "$candidate" true 2>&1)"; then
+                working_key="$candidate"
+                label=bootstrap
+                [[ "$candidate" == "$stable_key" ]] && label=stable
+                log "SSH connected using the $label key."
                 if [[ "$ssh_outage_notified" == true ]]; then
                     send_discord_notification \
                         "OSMS server connectivity restored: $WATCH_TARGET" || true
@@ -230,7 +212,7 @@ wait_for_ssh() {
                 fi
                 return
             fi
-        fi
+        done
 
         key_update_needed=true
         log "SSH is not ready; retrying."
@@ -288,21 +270,24 @@ update_remote_access() {
 # session. Fixed key=value lines keep parsing simple on the watcher side.
 probe_remote() {
     local check_revision="$1"
-    local quoted_health_command quoted_status_command
-
-    printf -v quoted_health_command '%q' "$REMOTE_HEALTH_COMMAND"
-    printf -v quoted_status_command '%q' "$REMOTE_STATUS_COMMAND"
 
     remote "$working_key" \
-        "CHECK_REVISION=$check_revision HEALTH_COMMAND=$quoted_health_command STATUS_COMMAND=$quoted_status_command bash -s" \
+        "CHECK_REVISION=$check_revision bash -s" \
         <<'REMOTE_PROBE'
 set -u
 
-remote_status="$(bash -c "$STATUS_COMMAND" 2>/dev/null || printf missing)"
-if health_signal="$(bash -c "$HEALTH_COMMAND" 2>/dev/null)"; then
-    health_signal="${health_signal:-healthy}"
+remote_status="$(cat "$HOME/.check/status" 2>/dev/null || printf missing)"
+if curl --fail --silent --max-time 2 \
+    http://127.0.0.1:8015/healthz >/dev/null
+then
+    health_signal=healthy
 else
-    health_signal=missing
+    app_pid="$(cat "$HOME/OverSmart-Math-Solver/.runtime/app.pid" 2>/dev/null || true)"
+    if [[ "$app_pid" =~ ^[0-9]+$ ]] && kill -0 "$app_pid" 2>/dev/null; then
+        health_signal=busy
+    else
+        health_signal=missing
+    fi
 fi
 
 running_revision=""
@@ -316,16 +301,6 @@ if [[ "$CHECK_REVISION" == true ]]; then
             awk 'NR == 1 { print $1 }'
     )"
     running_model="$(cat "$app/.runtime/app.model" 2>/dev/null || true)"
-    if [[ -z "$running_model" ]]; then
-        app_pid="$(cat "$app/.runtime/app.pid" 2>/dev/null || true)"
-        if [[ "$app_pid" =~ ^[0-9]+$ && -r "/proc/$app_pid/environ" ]]; then
-            running_model="$(
-                tr '\0' '\n' < "/proc/$app_pid/environ" |
-                    sed -n 's/^OSMS_MODEL_NAME=//p' |
-                    head -n 1
-            )"
-        fi
-    fi
 fi
 
 read -r cpu_total cpu_idle < <(
@@ -532,53 +507,6 @@ mark_ssh_lost() {
     log "SSH connection was lost; returning to connection retries."
 }
 
-# Upload the prepared environment/model archive only to a fresh or explicitly
-# rebuilt deployment. A checksum marker avoids repeating the large transfer.
-sync_deploy_cache() {
-    local force_rebuild="$1"
-    local local_checksum remote_checksum
-
-    recovery_cache_archive=""
-    recovery_cache_checksum=""
-    [[ "$USE_DEPLOY_CACHE" == true ]] || return 0
-    [[ -n "$DEPLOY_CACHE_ARCHIVE" ]] || return 0
-    if [[ ! -r "$DEPLOY_CACHE_ARCHIVE" ]]; then
-        log "Deployment cache is not readable; continuing without it: $DEPLOY_CACHE_ARCHIVE"
-        return 0
-    fi
-
-    if [[ -r "$DEPLOY_CACHE_ARCHIVE.sha256" ]]; then
-        local_checksum="$(awk 'NR == 1 {print $1}' "$DEPLOY_CACHE_ARCHIVE.sha256")"
-    else
-        local_checksum="$(sha256sum "$DEPLOY_CACHE_ARCHIVE" | awk '{print $1}')"
-    fi
-    recovery_cache_checksum="$local_checksum"
-    remote_checksum="$(remote "$working_key" \
-        'cat "$HOME/.cache/osms-deploy-cache.sha256" 2>/dev/null || true' \
-        2>/dev/null || true)"
-
-    if [[ "$force_rebuild" != true && "$local_checksum" == "$remote_checksum" ]]; then
-        log "Deployment cache is already installed."
-        return 0
-    fi
-
-    recovery_cache_archive="/tmp/osms-deploy-cache.tar"
-    log "Uploading prepared Python environment and model cache."
-    if ! "$SCP_BIN" \
-        -o BatchMode=yes \
-        -o ConnectTimeout="$SSH_CONNECT_TIMEOUT" \
-        "${ssh_host_options[@]}" \
-        "${ssh_control_options[@]}" \
-        -P "$SSH_PORT" \
-        -i "$working_key" \
-        "$DEPLOY_CACHE_ARCHIVE" \
-        "$WATCH_TARGET:$recovery_cache_archive"
-    then
-        log "Deployment cache upload failed; continuing with normal installation."
-        recovery_cache_archive=""
-    fi
-}
-
 run_recovery() {
     local force_rebuild="$1"
     local quoted_model_name quoted_preload
@@ -586,16 +514,9 @@ run_recovery() {
     printf -v quoted_model_name '%q' "$OSMS_MODEL_NAME"
     printf -v quoted_preload '%q' "$OSMS_PRELOAD_LOCAL_MODEL"
 
-    sync_deploy_cache "$force_rebuild"
-    if [[ -n "$recovery_cache_archive" ]]; then
-        remote "$working_key" \
-            "FORCE_REBUILD_REPO=$force_rebuild DEPLOY_CACHE_ARCHIVE=$recovery_cache_archive DEPLOY_CACHE_CHECKSUM=$recovery_cache_checksum OSMS_MODEL_NAME=$quoted_model_name OSMS_PRELOAD_LOCAL_MODEL=$quoted_preload bash -s" \
-            < "$RECOVERY_SCRIPT"
-    else
-        remote "$working_key" \
-            "FORCE_REBUILD_REPO=$force_rebuild OSMS_MODEL_NAME=$quoted_model_name OSMS_PRELOAD_LOCAL_MODEL=$quoted_preload bash -s" \
-            < "$RECOVERY_SCRIPT"
-    fi
+    remote "$working_key" \
+        "FORCE_REBUILD_REPO=$force_rebuild OSMS_MODEL_NAME=$quoted_model_name OSMS_PRELOAD_LOCAL_MODEL=$quoted_preload bash -s" \
+        < "$RECOVERY_SCRIPT"
 }
 
 start_recovery() {
@@ -608,7 +529,7 @@ start_recovery() {
 while true; do
     [[ -n "$working_key" ]] || wait_for_ssh
 
-    if [[ "$key_update_needed" == true && "$UPDATE_SSH_KEY_ON_FIRST_PING" == true ]]; then
+    if [[ "$key_update_needed" == true ]]; then
         update_remote_access
     fi
 

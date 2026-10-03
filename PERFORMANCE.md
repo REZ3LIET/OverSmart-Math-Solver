@@ -37,8 +37,14 @@ tokens/second), used 97.8% CPU, and peaked at 3903.96 MB process memory.
   environment.
 - Model download and preload occur during recovery.
 
-## Next measurement
+## Measured CPU configuration
 
-Deploy the new configuration and compare recovery time, model-ready time,
-response time, tokens/second, and peak memory against the baseline above. Limit
-concurrent local generations to one if simultaneous requests cause contention.
+The deployed 0.5B model generated 128 tokens in 9.84 seconds at 13.01 tokens/s
+and peaked at 1508.30 MB process memory. Compared with the recorded 3B run, this
+was about 11.9 times faster by response time, about 50 times faster by token
+throughput, and used about 61% less peak process memory.
+
+The full-cache deployment experiment was removed from the final scripts because
+its 606.2-second transfer/extraction path was slower than the 341.0-second fresh
+path. Further cold-start work should target the dependency set or a host-level
+image rather than transferring the complete virtual environment.
