@@ -178,6 +178,7 @@ previous_cpu_sample_ns=""
 ssh_outage_notified=false
 app_down_notified=false
 remote_failure_notified=false
+capacity_state=""
 
 [[ "$RESOURCE_LOG_FILE" = /* ]] || RESOURCE_LOG_FILE="$SCRIPT_DIR/../$RESOURCE_LOG_FILE"
 mkdir -p "$(dirname -- "$RESOURCE_LOG_FILE")"
@@ -414,6 +415,30 @@ threshold_exceeded() {
         'BEGIN { exit !(value > threshold) }'
 }
 
+# Update the remote UI flag only when capacity state changes. This adds no SSH
+# traffic during steady-state monitoring.
+update_capacity_state() {
+    local next_state="$1"
+
+    [[ "$next_state" != "$capacity_state" ]] || return 0
+    if [[ "$next_state" == near-capacity ]]; then
+        if ! remote "$working_key" \
+            'mkdir -p "$HOME/.check" && printf "near-capacity\n" > "$HOME/.check/capacity.tmp" && mv "$HOME/.check/capacity.tmp" "$HOME/.check/capacity"'
+        then
+            log "Could not publish the near-capacity UI state."
+            return 1
+        fi
+    else
+        if ! remote "$working_key" 'rm -f -- "$HOME/.check/capacity"'; then
+            log "Could not clear the near-capacity UI state."
+            return 1
+        fi
+    fi
+
+    capacity_state="$next_state"
+    log "Capacity state changed to $next_state."
+}
+
 record_resources() {
     local timestamp now total_delta idle_delta usage_delta elapsed_usec
     local cpu_percent=unavailable
@@ -465,6 +490,12 @@ record_resources() {
         warnings+=("GPU ${gpu_percent}% > ${GPU_THRESHOLD}%")
     threshold_exceeded "$gpu_memory_percent" "$GPU_MEMORY_THRESHOLD" && \
         warnings+=("GPU memory ${gpu_memory_percent}% > ${GPU_MEMORY_THRESHOLD}%")
+
+    if (( ${#warnings[@]} > 0 )); then
+        update_capacity_state near-capacity || true
+    else
+        update_capacity_state normal || true
+    fi
 
     now="$(date +%s)"
     if (( ${#warnings[@]} > 0 && now - last_resource_alert >= RESOURCE_ALERT_COOLDOWN )); then

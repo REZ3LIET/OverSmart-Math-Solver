@@ -183,6 +183,7 @@ nohup env \
     GRADIO_SERVER_PORT="$APP_PORT" \
     OSMS_MODEL_NAME="$OSMS_MODEL_NAME" \
     OSMS_PRELOAD_LOCAL_MODEL="$OSMS_PRELOAD_LOCAL_MODEL" \
+    OSMS_CAPACITY_FILE="$STATE_DIR/capacity" \
     .venv/bin/python app.py \
     > "$log_file" 2>&1 < /dev/null &
 app_pid=$!

@@ -34,6 +34,10 @@
   `Qwen/Qwen2.5-0.5B-Instruct` model with a 128-token default.
 - [x] Deploy and benchmark the 0.5B CPU model: 9.84 seconds, 13.01 tokens/s,
   and 1508.30 MB peak process memory in the recorded run.
+- [x] Add a threshold-driven adaptive UI response. The watcher publishes a
+  capacity flag only when threshold state changes; Gradio checks it every two
+  seconds, displays a near-capacity warning, and clears it when resources return
+  below all configured thresholds.
 
 ## Partially completed
 
@@ -135,7 +139,7 @@ applicable unless explicitly qualified.
   Add cases for failed key update/retry, host-key change, stale/reused PID,
   traversal and symlink deletion attempts, command timeouts, two concurrent
   watchers, failed release rollback, maximum busy duration, and log rotation.
-- [ ] **Add an overload reaction policy.** Switch to a smaller workload, reduce
-  token limits/concurrency, queue or reject new work, and show a near-capacity
-  message in the UI. Enter overload only after sustained threshold violations
-  and recover below a lower threshold so behavior does not flap around 80%.
+- [ ] **Harden the basic overload response.** The required near-capacity banner
+  is implemented. Add sustained-sample hysteresis and, if stronger protection
+  is needed, reduce token limits/concurrency or queue/reject new work so the
+  state cannot flap around 80%.

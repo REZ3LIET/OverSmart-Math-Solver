@@ -5,6 +5,10 @@
 
 set -u
 
+if [[ -n "${FAKE_SSH_LOG:-}" ]]; then
+    printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+fi
+
 if [[ "$*" != *"CHECK_REVISION="* ]]; then
     exit 0
 fi
@@ -21,7 +25,6 @@ printf '%s\n' \
     'cpu_usage_usec=100' \
     'cpu_sample_ns=1000000000' \
     'cpu_capacity=2' \
-    'memory_percent=10.0' \
+    "memory_percent=${FAKE_MEMORY_PERCENT:-10.0}" \
     'gpu_percent=unavailable' \
     'gpu_memory_percent=unavailable'
-

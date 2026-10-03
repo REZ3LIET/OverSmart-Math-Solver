@@ -16,6 +16,9 @@ case "$(basename -- "$0")" in
         ;;
     python)
         if [[ " $* " == *" app.py "* ]]; then
+            if [[ -n "${FAKE_APP_ENV_LOG:-}" ]]; then
+                printf '%s\n' "${OSMS_CAPACITY_FILE:-}" > "$FAKE_APP_ENV_LOG"
+            fi
             exec sleep 30
         fi
         exit 0
@@ -25,4 +28,3 @@ case "$(basename -- "$0")" in
         exit 1
         ;;
 esac
-

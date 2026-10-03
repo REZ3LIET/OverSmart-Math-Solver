@@ -172,6 +172,11 @@ failure messages. Optional Discord notifications cover:
 - app down/restored state;
 - recovery success/failure.
 
+The watcher also publishes `$HOME/.check/capacity` when any monitored resource
+exceeds its threshold and removes it when all resources are below threshold.
+It performs this remote write only when the state changes. Gradio checks the
+flag every two seconds and displays “System near capacity” while it exists.
+
 Test the configured webhook without entering the watcher loop:
 
 ```bash
@@ -187,6 +192,7 @@ Run syntax and isolated control-flow checks without contacting the real LXC:
 
 ```bash
 bash -n bash/*.sh tests/*.sh tests/fixtures/*.sh
+python3 tests/test_capacity_status.py
 ./tests/test_setup.sh
 ./tests/test_watcher.sh
 ```

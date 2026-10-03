@@ -5,6 +5,7 @@ import gradio as gr
 from fastapi import FastAPI
 import uvicorn
 
+from capacity_status import capacity_message
 from model_inference import (
     generate_api_math_representation,
     generate_math_representation,
@@ -190,6 +191,8 @@ with gr.Blocks(title="OSMS") as demo:
         """
     )
 
+    capacity_banner = gr.Markdown(value=capacity_message())
+
     input_text = gr.Textbox(
         label="Input",
         placeholder="Enter your prompt...",
@@ -283,6 +286,16 @@ with gr.Blocks(title="OSMS") as demo:
     )
 
     demo.load(fn=local_model_status, outputs=local_status)
+    demo.load(fn=capacity_message, outputs=capacity_banner)
+
+    # Refresh only the small capacity banner; inference components are untouched.
+    if hasattr(gr, "Timer"):
+        capacity_timer = gr.Timer(value=2.0, active=True)
+        capacity_timer.tick(
+            fn=capacity_message,
+            outputs=capacity_banner,
+            show_progress="hidden",
+        )
 
 
 # Standalone deployments mount Gradio beneath a small FastAPI parent. This

@@ -14,6 +14,7 @@ bootstrap_key="$test_dir/bootstrap_ed25519"
 credentials_dir="$test_dir/credentials"
 env_file="$test_dir/watcher.env"
 resource_log="$test_dir/resources.csv"
+ssh_log="$test_dir/ssh.log"
 ssh-keygen -q -t ed25519 -N '' -f "$bootstrap_key"
 
 printf '%s\n' \
@@ -37,10 +38,14 @@ printf '%s\n' \
 run_case() {
     local health="$1"
     local output="$2"
+    local memory_percent="${3:-10.0}"
     local exit_code
 
     set +e
-    FAKE_PROBE_HEALTH="$health" timeout 1 \
+    FAKE_PROBE_HEALTH="$health" \
+    FAKE_MEMORY_PERCENT="$memory_percent" \
+    FAKE_SSH_LOG="$ssh_log" \
+    timeout 1 \
         env ENV_FILE="$env_file" bash "$WATCHER" > "$output" 2>&1
     exit_code=$?
     set -e
@@ -52,6 +57,8 @@ run_case healthy "$healthy_log"
 grep -q 'SSH connected using the bootstrap key.' "$healthy_log"
 grep -q 'Remote access updated; active key:' "$healthy_log"
 grep -q 'Application is healthy.' "$healthy_log"
+grep -q 'Capacity state changed to normal.' "$healthy_log"
+grep -q 'rm -f --.*\.check/capacity' "$ssh_log"
 
 busy_log="$test_dir/busy.log"
 run_case busy "$busy_log"
@@ -64,8 +71,12 @@ run_case missing "$missing_log"
 grep -q 'Application is unhealthy; running recovery.' "$missing_log"
 grep -q 'Recovery completed in' "$missing_log"
 
+capacity_log="$test_dir/capacity.log"
+run_case healthy "$capacity_log" 90.0
+grep -q 'Capacity state changed to near-capacity.' "$capacity_log"
+grep -q '\.check/capacity.tmp' "$ssh_log"
+
 [[ -s "$resource_log" ]]
 [[ -r "$credentials_dir/user_fake-host_ed25519" ]]
 
 printf 'Watcher control-flow tests passed.\n'
-
