@@ -19,8 +19,11 @@ SETUP_CHECK_INTERVAL="${SETUP_CHECK_INTERVAL:-15}"
 DEPLOY_CHECK_INTERVAL="${DEPLOY_CHECK_INTERVAL:-30}"
 SSH_RETRY_INTERVAL="${SSH_RETRY_INTERVAL:-1}"
 SSH_CONNECT_TIMEOUT="${SSH_CONNECT_TIMEOUT:-2}"
+APP_PORT="${APP_PORT:-7860}"
 CREDENTIALS_DIR="${CREDENTIALS_DIR:-$HOME/.ssh/osms-recovery}"
-SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+# The assigned lab endpoint is a disposable LXC whose SSH host key changes
+# after a wipe. `no` permits unattended recovery at that trusted endpoint.
+SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-no}"
 SSH_KNOWN_HOSTS_FILE="${SSH_KNOWN_HOSTS_FILE:-$CREDENTIALS_DIR/known_hosts}"
 SSH_DIAGNOSTIC_INTERVAL="${SSH_DIAGNOSTIC_INTERVAL:-5}"
 SSH_BIN="${SSH_BIN:-ssh}"
@@ -271,15 +274,18 @@ update_remote_access() {
 # session. Fixed key=value lines keep parsing simple on the watcher side.
 probe_remote() {
     local check_revision="$1"
+    local quoted_app_port
+
+    printf -v quoted_app_port '%q' "$APP_PORT"
 
     remote "$working_key" \
-        "CHECK_REVISION=$check_revision bash -s" \
+        "APP_PORT=$quoted_app_port CHECK_REVISION=$check_revision bash -s" \
         <<'REMOTE_PROBE'
 set -u
 
 remote_status="$(cat "$HOME/.check/status" 2>/dev/null || printf missing)"
 if curl --fail --silent --max-time 2 \
-    http://127.0.0.1:8015/healthz >/dev/null
+    "http://127.0.0.1:$APP_PORT/healthz" >/dev/null
 then
     health_signal=healthy
 else
@@ -540,13 +546,14 @@ mark_ssh_lost() {
 
 run_recovery() {
     local force_rebuild="$1"
-    local quoted_model_name quoted_preload
+    local quoted_app_port quoted_model_name quoted_preload
 
+    printf -v quoted_app_port '%q' "$APP_PORT"
     printf -v quoted_model_name '%q' "$OSMS_MODEL_NAME"
     printf -v quoted_preload '%q' "$OSMS_PRELOAD_LOCAL_MODEL"
 
     remote "$working_key" \
-        "FORCE_REBUILD_REPO=$force_rebuild OSMS_MODEL_NAME=$quoted_model_name OSMS_PRELOAD_LOCAL_MODEL=$quoted_preload bash -s" \
+        "APP_PORT=$quoted_app_port FORCE_REBUILD_REPO=$force_rebuild OSMS_MODEL_NAME=$quoted_model_name OSMS_PRELOAD_LOCAL_MODEL=$quoted_preload bash -s" \
         < "$RECOVERY_SCRIPT"
 }
 

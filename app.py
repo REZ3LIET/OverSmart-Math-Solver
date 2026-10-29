@@ -318,7 +318,9 @@ if not HF_OAUTH_ENABLED:
 
 if __name__ == "__main__":
     server_name = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
-    server_port = int(os.getenv("GRADIO_SERVER_PORT", "8015"))
+    # The course infrastructure maps the LXC's Gradio port 7860 to public
+    # port 8015 on the host. This is the internal listening port only.
+    server_port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
     preload_enabled = os.getenv("OSMS_PRELOAD_LOCAL_MODEL", "false").lower() in {
         "1",
         "true",

@@ -5,7 +5,13 @@
 set -u
 
 case "$(basename -- "$0")" in
-    dpkg|curl)
+    dpkg)
+        exit 0
+        ;;
+    curl)
+        if [[ -n "${FAKE_CURL_LOG:-}" ]]; then
+            printf '%s\n' "$*" >> "$FAKE_CURL_LOG"
+        fi
         exit 0
         ;;
     git)
@@ -17,7 +23,8 @@ case "$(basename -- "$0")" in
     python)
         if [[ " $* " == *" app.py "* ]]; then
             if [[ -n "${FAKE_APP_ENV_LOG:-}" ]]; then
-                printf '%s\n' "${OSMS_CAPACITY_FILE:-}" > "$FAKE_APP_ENV_LOG"
+                printf 'capacity_file=%s\n' "${OSMS_CAPACITY_FILE:-}" > "$FAKE_APP_ENV_LOG"
+                printf 'server_port=%s\n' "${GRADIO_SERVER_PORT:-}" >> "$FAKE_APP_ENV_LOG"
             fi
             exec sleep 30
         fi

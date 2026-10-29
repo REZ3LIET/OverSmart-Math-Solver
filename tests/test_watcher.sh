@@ -23,12 +23,12 @@ printf '%s\n' \
     "BOOTSTRAP_SSH_IDENTITY_FILE=$bootstrap_key" \
     'SSH_PORT=22015' \
     "CREDENTIALS_DIR=$credentials_dir" \
-    'SSH_STRICT_HOST_KEY_CHECKING=no' \
     'CHECK_INTERVAL=0.05' \
     'SETUP_CHECK_INTERVAL=0.05' \
     'DEPLOY_CHECK_INTERVAL=99999' \
     'SSH_RETRY_INTERVAL=0.05' \
     'SSH_CONNECT_TIMEOUT=1' \
+    'APP_PORT=7860' \
     'SSH_CONTROL_PERSIST=1' \
     "SSH_BIN=$FAKE_SSH" \
     "RESOURCE_LOG_FILE=$resource_log" \
@@ -59,6 +59,8 @@ grep -q 'Remote access updated; active key:' "$healthy_log"
 grep -q 'Application is healthy.' "$healthy_log"
 grep -q 'Capacity state changed to normal.' "$healthy_log"
 grep -q 'rm -f --.*\.check/capacity' "$ssh_log"
+grep -q 'APP_PORT=7860 CHECK_REVISION=' "$ssh_log"
+grep -q 'StrictHostKeyChecking=no' "$ssh_log"
 
 busy_log="$test_dir/busy.log"
 run_case busy "$busy_log"
@@ -70,6 +72,7 @@ missing_log="$test_dir/missing.log"
 run_case missing "$missing_log"
 grep -q 'Application is unhealthy; running recovery.' "$missing_log"
 grep -q 'Recovery completed in' "$missing_log"
+grep -q 'APP_PORT=7860 FORCE_REBUILD_REPO=' "$ssh_log"
 
 capacity_log="$test_dir/capacity.log"
 run_case healthy "$capacity_log" 90.0

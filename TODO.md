@@ -38,6 +38,11 @@
   capacity flag only when threshold state changes; Gradio checks it every two
   seconds, displays a near-capacity warning, and clears it when resources return
   below all configured thresholds.
+- [x] Correct the course port boundary: Gradio and the watchdog use internal
+  port 7860, while the infrastructure exposes that service on host port 8015.
+  Pass one `APP_PORT` value to both setup and the remote health probe.
+- [x] Make wipe recovery tolerate the disposable LXC's regenerated SSH host
+  key by using the documented lab-only `StrictHostKeyChecking=no` default.
 
 ## Partially completed
 
@@ -68,11 +73,11 @@ applicable unless explicitly qualified.
   standard input or a protected descriptor, and never place it in an SSH command
   argument. If assignment policy permits key-only access, remove password
   management and disable SSH password authentication instead.
-- [ ] **Add a network/authentication boundary for standalone Gradio.** Since
-  access already uses SSH forwarding, prefer binding the application to
-  `127.0.0.1`; otherwise place it behind an authenticated TLS reverse proxy and
-  firewall. Do not accept personal Hugging Face tokens over unauthenticated
-  plaintext HTTP, and rate-limit or otherwise control expensive inference.
+- [ ] **Add a network/authentication boundary for standalone Gradio.** The
+  course infrastructure publishes internal port 7860 as external port 8015,
+  so place the app behind authentication/TLS where the environment permits.
+  Do not accept personal Hugging Face tokens over unauthenticated plaintext
+  HTTP, and rate-limit or otherwise control expensive inference.
 - [ ] **Evaluation tooling, separate/out of deployment scope:** replace the
   eval-backed SymPy parsing of model output with a strict token/AST allowlist or
   run it in a disposable unprivileged, network-isolated sandbox. Do not execute
@@ -84,8 +89,9 @@ applicable unless explicitly qualified.
 - [ ] **Verify process identity, not only a numeric PID.** Record the app start
   time and expected command/revision, confirm them before signaling, use a
   bounded TERM-then-KILL sequence, and fail deployment if the old process still
-  owns port 8015. A deployment is successful only when the newly launched PID
-  is alive and its readiness response reports the expected revision/model.
+  owns internal port 7860. A deployment is successful only when the newly
+  launched PID is alive and its readiness response reports the expected
+  revision/model.
 - [ ] **Make deployment atomic with rollback.** Build each revision and virtual
   environment in a versioned release directory, test it on a temporary port,
   atomically switch a `current` symlink, and retain at least one known-good

@@ -29,12 +29,15 @@ APP_DIR="$app_dir" \
 APP_START_TIMEOUT=2 \
 OSMS_MODEL_NAME='Qwen/Qwen2.5-0.5B-Instruct' \
 FAKE_APP_ENV_LOG="$test_dir/app-environment.log" \
+FAKE_CURL_LOG="$test_dir/curl.log" \
 bash "$SETUP" > "$test_dir/setup.log" 2>&1
 
 [[ "$(<"$test_dir/home/.check/status")" == healthy ]]
 [[ "$(<"$app_dir/.runtime/app.commit")" == test-revision ]]
 [[ "$(<"$app_dir/.runtime/app.model")" == Qwen/Qwen2.5-0.5B-Instruct ]]
-[[ "$(<"$test_dir/app-environment.log")" == "$test_dir/home/.check/capacity" ]]
+grep -Fxq "capacity_file=$test_dir/home/.check/capacity" "$test_dir/app-environment.log"
+grep -Fxq 'server_port=7860' "$test_dir/app-environment.log"
+grep -q 'http://127.0.0.1:7860/healthz' "$test_dir/curl.log"
 app_pid="$(<"$app_dir/.runtime/app.pid")"
 kill -0 "$app_pid"
 kill "$app_pid"

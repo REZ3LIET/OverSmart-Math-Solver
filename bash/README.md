@@ -27,6 +27,7 @@ WATCH_TARGET=student-admin@host
 SSH_PORT=22015
 BOOTSTRAP_SSH_IDENTITY_FILE=/absolute/path/to/student-admin_key
 CREDENTIALS_DIR=~/.ssh/osms-recovery
+APP_PORT=7860
 ```
 
 Then run the watcher from the repository root:
@@ -68,9 +69,19 @@ old Python process running.
    changes.
 6. Downloads/verifies the configured local model, reusing Hugging Face cache.
 7. Stops the recorded application process and starts Gradio with `nohup` on
-   `0.0.0.0:8015`.
+   the LXC's internal address `0.0.0.0:7860`.
 8. Waits for `/healthz`; success records the PID, commit, model, and `healthy`
    status.
+
+The course infrastructure maps internal LXC port `7860` to external port
+`8015` on the assigned host. Consequently:
+
+- Gradio listens inside the LXC on `0.0.0.0:7860`.
+- The watcher checks `http://127.0.0.1:7860/healthz` over SSH.
+- Users open `http://paffenroth-23.dyn.wpi.edu:8015` externally.
+
+`APP_PORT` is passed by the watcher to both the health probe and `setup.sh`, so
+the monitor cannot silently check a different port from the deployed app.
 
 Progress is written to `$HOME/.check/status` as `recovering`, `build-system`,
 `build-repo`, `build-venv`, `build-dependencies`, `build-model`, `build-app`,
@@ -112,19 +123,21 @@ key and reinstalls the stable key. You do not change the launch command.
 ## Host-key policy
 
 Watcher host keys are stored separately in `$CREDENTIALS_DIR/known_hosts`.
-`SSH_STRICT_HOST_KEY_CHECKING=accept-new` accepts first contact but rejects a
-changed host identity. A disposable LXC that regenerates its host key may use:
+The course LXC is disposable and may regenerate its SSH host key after a wipe,
+so the recovery default is:
 
 ```text
 SSH_STRICT_HOST_KEY_CHECKING=no
 ```
 
 This enables unattended recovery but cannot distinguish a legitimate rebuild
-from impersonation. Use it only for the trusted lab endpoint.
+from impersonation. Use it only for the trusted lab endpoint. For a persistent
+server with a fingerprint that can be verified out of band, override it with
+`SSH_STRICT_HOST_KEY_CHECKING=accept-new` or `yes`.
 
 ## Health and process behavior
 
-The app exposes `/healthz`. The combined probe returns:
+The app exposes `/healthz` on internal port `7860`. The combined probe returns:
 
 - `healthy` when the endpoint responds;
 - `busy` when HTTP times out but the recorded PID is alive;

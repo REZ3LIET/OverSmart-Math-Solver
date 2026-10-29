@@ -2,7 +2,7 @@
 
 # Runs inside the remote LXC when the watcher detects an unhealthy app.
 # The script is safe to rerun: it updates the checkout, reuses the virtual
-# environment, restarts the app, and verifies port 8015.
+# environment, restarts the app, and verifies the internal Gradio port 7860.
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ REPO_BRANCH="${REPO_BRANCH:-main}"
 APP_DIR="${APP_DIR:-$HOME/OverSmart-Math-Solver}"
 APP_HOST="${APP_HOST:-0.0.0.0}"
 HEALTH_HOST="${HEALTH_HOST:-127.0.0.1}"
-APP_PORT="${APP_PORT:-8015}"
+APP_PORT="${APP_PORT:-7860}"
 APP_START_TIMEOUT="${APP_START_TIMEOUT:-180}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REBUILD_REPO="${FORCE_REBUILD_REPO:-false}"

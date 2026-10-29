@@ -13,7 +13,9 @@ set -euo pipefail
 : "${CREDENTIALS_DIR:?}"
 
 SSH_BIN="${SSH_BIN:-ssh}"
-SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+# Match the watcher default for the disposable course LXC. Override this with
+# `accept-new` or `yes` when the server host key is persistent and verified.
+SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-no}"
 SSH_KNOWN_HOSTS_FILE="${SSH_KNOWN_HOSTS_FILE:-$CREDENTIALS_DIR/known_hosts}"
 
 mkdir -p "$CREDENTIALS_DIR"
