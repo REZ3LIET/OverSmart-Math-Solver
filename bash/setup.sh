@@ -78,12 +78,16 @@ fi
 # Clone on first setup; otherwise update the existing deployment checkout.
 printf 'build-repo\n' > "$STATE_DIR/status"
 if [[ "$FORCE_REBUILD_REPO" == true ]]; then
-    # Restrict recursive deletion to an application directory below HOME.
-    if [[ -z "$APP_DIR" || "$APP_DIR" == "$HOME" || "$APP_DIR" != "$HOME/"* ]]; then
+    # Only the canonical default checkout may be recursively removed.
+    canonical_home="$(realpath -e -- "$HOME")"
+    approved_app_dir="$canonical_home/OverSmart-Math-Solver"
+    canonical_app_dir="$(realpath -m -- "$APP_DIR")"
+    if [[ -L "$APP_DIR" || "$canonical_app_dir" != "$approved_app_dir" ]]; then
         log "Refusing unsafe application directory: $APP_DIR"
         mark_failed
         exit 1
     fi
+    APP_DIR="$canonical_app_dir"
     stop_recorded_app
     log "Removing existing application checkout."
     rm -rf -- "$APP_DIR"

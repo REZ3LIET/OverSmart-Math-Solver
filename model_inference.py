@@ -37,18 +37,13 @@ def _load_model(model_name: str = DEFAULT_MODEL_NAME):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        # Preserve the model's native BF16 dtype on CPU. Expanding a 1.5B
-        # model to FP32 would exceed this LXC's practical memory budget.
+        # Preserve the model's native dtype instead of expanding it on CPU.
         dtype="auto",
         device_map="auto" if torch.cuda.is_available() else None,
         low_cpu_mem_usage=True,
-        trust_remote_code=True,
     )
     if not torch.cuda.is_available():
         model.to("cpu")

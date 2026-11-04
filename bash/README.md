@@ -108,7 +108,8 @@ The key updater follows this order:
    verification.
 
 The stable private key and password file use mode `0600`; the credential
-directory uses `0700`. Do not commit them.
+directory uses `0700`. The password is sent through SSH standard input rather
+than a process argument. Do not commit these credentials.
 
 Log in manually with the same stable key:
 
@@ -205,14 +206,16 @@ Run syntax and isolated control-flow checks without contacting the real LXC:
 
 ```bash
 bash -n bash/*.sh tests/*.sh tests/fixtures/*.sh
+python3 tests/test_remote_inference.py
 python3 tests/test_capacity_status.py
 ./tests/test_setup.sh
 ./tests/test_watcher.sh
 ```
 
-The setup test checks final health/PID/commit/model markers. The watcher test
-checks bootstrap-to-stable key handling plus healthy, busy, unhealthy, and
-successful recovery branches through a fake SSH transport.
+The setup test checks final health/PID/commit/model markers and rejects unsafe
+rebuild targets. The watcher test checks bootstrap-to-stable key handling,
+password secrecy, and healthy, busy, unhealthy, and successful recovery
+branches through a fake SSH transport.
 
 The red-team scripts can also be checked safely after the assignment window:
 both exit before creating a cron entry or making an SSH attempt.

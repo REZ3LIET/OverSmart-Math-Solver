@@ -1,9 +1,10 @@
 import sys
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-# Allow imports from the project root when this file is run from tests/
+# Allow imports from the project root when this file is run from tests/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from model_inference import generate_api_math_representation
@@ -39,32 +40,37 @@ class FakeBlankClient:
         yield make_chunk(None)
 
 
-def test_streaming_response_is_returned():
-    with patch("huggingface_hub.InferenceClient", FakeStreamingClient):
-        response, metrics = generate_api_math_representation(
-            prompt="90 + 10",
-            generation_level="Highschool",
-            max_new_tokens=64,
-            temperature=0.7,
-            hf_token="fake-token",
-        )
-
-    assert response == "$$10 \\\\times 10$$"
-    assert metrics["mode"] == "api"
-    assert metrics["generated_tokens"] > 0
-
-
-def test_blank_stream_raises_clear_error():
-    with patch("huggingface_hub.InferenceClient", FakeBlankClient):
-        try:
-            generate_api_math_representation(
-                prompt="1 + 1",
+class RemoteInferenceTest(unittest.TestCase):
+    def test_streaming_response_is_returned(self):
+        fake_module = SimpleNamespace(InferenceClient=FakeStreamingClient)
+        with patch.dict(sys.modules, {"huggingface_hub": fake_module}):
+            response, metrics = generate_api_math_representation(
+                prompt="90 + 10",
                 generation_level="Highschool",
                 max_new_tokens=64,
                 temperature=0.7,
                 hf_token="fake-token",
             )
-        except RuntimeError as error:
-            assert "returned no visible text content" in str(error)
-        else:
-            raise AssertionError("Expected RuntimeError")
+
+        self.assertEqual(response, "$$10 \\\\times 10$$")
+        self.assertEqual(metrics["mode"], "api")
+        self.assertGreater(metrics["generated_tokens"], 0)
+
+    def test_blank_stream_raises_clear_error(self):
+        fake_module = SimpleNamespace(InferenceClient=FakeBlankClient)
+        with patch.dict(sys.modules, {"huggingface_hub": fake_module}):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "returned no visible text content",
+            ):
+                generate_api_math_representation(
+                    prompt="1 + 1",
+                    generation_level="Highschool",
+                    max_new_tokens=64,
+                    temperature=0.7,
+                    hf_token="fake-token",
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

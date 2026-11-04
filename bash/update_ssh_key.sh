@@ -18,6 +18,7 @@ SSH_BIN="${SSH_BIN:-ssh}"
 SSH_STRICT_HOST_KEY_CHECKING="${SSH_STRICT_HOST_KEY_CHECKING:-no}"
 SSH_KNOWN_HOSTS_FILE="${SSH_KNOWN_HOSTS_FILE:-$CREDENTIALS_DIR/known_hosts}"
 
+umask 077
 mkdir -p "$CREDENTIALS_DIR"
 chmod 700 "$CREDENTIALS_DIR"
 
@@ -42,9 +43,8 @@ login_user="${WATCH_TARGET%@*}"
     exit 1
 }
 
-# Quote values before placing them in the remote shell environment.
+# Quote non-secret values before placing them in the remote shell environment.
 printf -v quoted_public_key '%q' "$public_key"
-printf -v quoted_password '%q' "$password"
 printf -v quoted_login_user '%q' "$login_user"
 
 connect() {
@@ -60,10 +60,14 @@ connect() {
         "$WATCH_TARGET" "$@"
 }
 
-# Apply the account password and add the stable watcher key.
-connect "$SSH_IDENTITY_FILE" \
-    "NEW_PUBLIC_KEY=$quoted_public_key NEW_PASSWORD=$quoted_password LOGIN_USER=$quoted_login_user bash -s" <<'REMOTE_INSTALL'
+# Apply the account password and add the stable watcher key. The password is
+# the first stdin line, so it never appears in the SSH process arguments.
+{
+    printf '%s\n' "$password"
+    cat <<'REMOTE_INSTALL'
 set -euo pipefail
+IFS= read -r NEW_PASSWORD <&3
+exec 3<&-
 
 if [[ "$(id -u)" == 0 ]]; then
     printf '%s:%s\n' "$LOGIN_USER" "$NEW_PASSWORD" | chpasswd
@@ -79,6 +83,8 @@ grep -qxF "$NEW_PUBLIC_KEY" "$HOME/.ssh/authorized_keys" || \
 chmod 700 "$HOME/.ssh"
 chmod 600 "$HOME/.ssh/authorized_keys"
 REMOTE_INSTALL
+} | connect "$SSH_IDENTITY_FILE" \
+    "NEW_PUBLIC_KEY=$quoted_public_key LOGIN_USER=$quoted_login_user bash -c 'IFS= read -r password; exec 3<<< \"\$password\"; unset password; exec bash -s 3<&3'"
 
 # Never disable the old key until the stable key has successfully logged in.
 connect "$stable_key" true >/dev/null || {

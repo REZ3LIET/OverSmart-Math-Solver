@@ -1,6 +1,12 @@
-# Recovery TODO
+# Project TODO
 
-## Completed
+## Application TODO
+
+No required application work remains before the Docker migration. The Gradio
+UI, remote inference, automatic local fallback, progress feedback, error
+reporting, and optional user-provided Hugging Face token flow are implemented.
+
+## Completed legacy LXD recovery work
 
 - [x] Use shallow Git clone/fetch during recovery.
 - [x] Reuse the virtual environment and install dependencies only when
@@ -43,48 +49,45 @@
   Pass one `APP_PORT` value to both setup and the remote health probe.
 - [x] Make wipe recovery tolerate the disposable LXC's regenerated SSH host
   key by using the documented lab-only `StrictHostKeyChecking=no` default.
+- [x] Restrict clean-rebuild deletion to the canonical
+  `$HOME/OverSmart-Math-Solver` path and reject home, traversal, and symlink
+  targets before `rm -rf`.
+- [x] Create watcher credentials under `umask 077` and transmit the generated
+  account password through SSH standard input instead of process arguments.
+- [x] Remove unnecessary `trust_remote_code=True` model loading and make the
+  remote-inference tests runnable with the Python standard library.
 
-## Partially completed
+## Docker / Deployment TODO
+
+These tasks concern packaging, ingress, runtime health, secrets, monitoring, or
+retiring the legacy LXD recovery path. They are not application feature work.
+
+### Performance
 
 - [ ] Optimize cold recovery further. Dependency installation remains the main
-  bottleneck. Investigate a smaller dependency set or host-level prebuilt image.
+  bottleneck. Use Docker image layers or a prebuilt image instead of installing
+  the environment during each recovery.
 
-## Security review follow-up
+### Security review follow-up
 
 The review was assessed against the current simplified scripts on October 3,
 2026. Line numbers in the review may be stale, but the issues below remain
 applicable unless explicitly qualified.
 
-### P0 — high severity
+#### P0 — high severity
 
 - [ ] **Deploy only reviewed, immutable artifacts.** Stop executing arbitrary
   changes from mutable `main`. Require an approved commit or verified signed
   tag; pin Python dependencies with hashes; pin the Hugging Face model revision;
-  prefer `safetensors`; and remove `trust_remote_code=True` unless a reviewed,
-  pinned model demonstrably requires it. Recovery must reject an unapproved
-  revision instead of automatically executing it.
-- [ ] **Make clean-rebuild deletion traversal-safe.** Resolve `$HOME` and
-  `APP_DIR` with `realpath -m`, reject symlinks and `..` traversal, and allow
-  recursive deletion only when the canonical path exactly matches the approved
-  application directory. Add tests for `$HOME`, `/`, `$HOME/../...`, symlinked
-  paths, and the valid deployment path.
-- [ ] **Keep the generated account password out of process arguments.** Set
-  `umask 077` before creating any credential, transmit a required password over
-  standard input or a protected descriptor, and never place it in an SSH command
-  argument. If assignment policy permits key-only access, remove password
-  management and disable SSH password authentication instead.
-- [ ] **Add a network/authentication boundary for standalone Gradio.** The
-  course infrastructure publishes internal port 7860 as external port 8015,
-  so place the app behind authentication/TLS where the environment permits.
-  Do not accept personal Hugging Face tokens over unauthenticated plaintext
-  HTTP, and rate-limit or otherwise control expensive inference.
-- [ ] **Evaluation tooling, separate/out of deployment scope:** replace the
-  eval-backed SymPy parsing of model output with a strict token/AST allowlist or
-  run it in a disposable unprivileged, network-isolated sandbox. Do not execute
-  untrusted model text in the deployment account. This item does not block the
-  requested `app.py` deployment work but remains a repository security issue.
+  and prefer `safetensors`. Recovery must reject an unapproved revision instead
+  of automatically executing it.
+- [ ] **Configure secure public ingress and inference controls.** Publish only
+  an HTTPS ngrok endpoint, keep Traffic Inspector Full Capture disabled,
+  document fine-grained Hugging Face tokens, and rate-limit or otherwise
+  control expensive inference. Decide separately whether the public product
+  requires access authentication; manual token entry may remain.
 
-### P1 — recovery correctness and containment
+#### P1 — recovery correctness and containment
 
 - [ ] **Verify process identity, not only a numeric PID.** Record the app start
   time and expected command/revision, confirm them before signaling, use a
@@ -118,16 +121,15 @@ applicable unless explicitly qualified.
   in logs. Define rotation and recovery procedures for the bootstrap key,
   account password (if retained), Hugging Face token, and Discord webhook.
 
-### P2 — health, configuration, logging, and tests
+#### P2 — health, configuration, logging, and tests
 
 - [ ] **Separate liveness from readiness.** Keep a cheap liveness endpoint, add
   readiness data for loaded model/revision, and impose a maximum `busy` duration
   so a wedged but live PID cannot suppress recovery forever. Use a low-frequency
   synthetic inference check for end-to-end confidence.
-- [ ] **Use one shared deployment configuration.** Remove hardcoded app path,
-  port, and branch assumptions from the watcher probe, or pass the same
-  `APP_DIR`, `APP_PORT`, and `REPO_BRANCH` values used by setup. Add a test with
-  non-default values.
+- [ ] **Finish shared deployment configuration.** `APP_PORT` is shared by setup
+  and the watcher; remove the remaining hardcoded app-path and branch
+  assumptions if the legacy SSH deployment remains after container migration.
 - [ ] **Separate commands from observed status.** Replace the overloaded
   `build-repo` value with an atomically written command/request file and keep
   build progress in a distinct status file. A watcher restart during

@@ -10,6 +10,7 @@ if [[ -n "${FAKE_SSH_LOG:-}" ]]; then
 fi
 
 if [[ "$*" != *"CHECK_REVISION="* ]]; then
+    [[ "$*" == *"bash -"* ]] && cat >/dev/null
     exit 0
 fi
 

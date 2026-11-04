@@ -61,6 +61,8 @@ grep -q 'Capacity state changed to normal.' "$healthy_log"
 grep -q 'rm -f --.*\.check/capacity' "$ssh_log"
 grep -q 'APP_PORT=7860 CHECK_REVISION=' "$ssh_log"
 grep -q 'StrictHostKeyChecking=no' "$ssh_log"
+password="$(<"$credentials_dir/user_fake-host_ed25519.password")"
+! grep -Fq -- "$password" "$ssh_log"
 
 busy_log="$test_dir/busy.log"
 run_case busy "$busy_log"

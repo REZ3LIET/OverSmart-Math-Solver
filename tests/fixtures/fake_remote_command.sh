@@ -15,6 +15,16 @@ case "$(basename -- "$0")" in
         exit 0
         ;;
     git)
+        if [[ "${1:-}" == clone ]]; then
+            target="${!#}"
+            fixture="$(readlink -f -- "$0")"
+            mkdir -p "$target/.git" "$target/.venv/bin"
+            printf 'transformers\n' > "$target/requirements.txt"
+            sha256sum "$target/requirements.txt" | awk '{ print $1 }' \
+                > "$target/.venv/.requirements.sha256"
+            printf '# fixture\n' > "$target/app.py"
+            ln -s "$fixture" "$target/.venv/bin/python"
+        fi
         if [[ "$*" == *"rev-parse HEAD"* ]]; then
             printf 'test-revision\n'
         fi
