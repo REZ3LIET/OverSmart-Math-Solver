@@ -3,6 +3,7 @@ import traceback
 
 import gradio as gr
 from fastapi import FastAPI
+from prometheus_client import Counter, Summary, start_http_server
 import uvicorn
 
 from capacity_status import capacity_message
@@ -13,6 +14,20 @@ from model_inference import (
     preload_local_model,
 )
 
+# --- Prometheus metrics ---
+REQUEST_COUNTER = Counter("app_requests_total", "Total number of solve requests")
+SUCCESSFUL_REQUESTS = Counter(
+    "app_successful_requests_total",
+    "Total number of successful solve requests",
+)
+FAILED_REQUESTS = Counter(
+    "app_failed_requests_total",
+    "Total number of failed solve requests",
+)
+REQUEST_DURATION = Summary(
+    "app_request_duration_seconds",
+    "Time spent processing solve requests",
+)
 
 # Hugging Face Spaces configures OAuth for us. A standalone deployment does
 # not, so enabling LoginButton there would make Gradio abort during startup.
@@ -58,6 +73,8 @@ def format_inference_report(metrics):
     )
 
 
+@REQUEST_DURATION.time()
+@FAILED_REQUESTS.count_exceptions()
 def generate_response(
     prompt,
     generation_level,
@@ -68,8 +85,10 @@ def generate_response(
     hf_token: gr.OAuthToken = None,
     progress=gr.Progress(),
 ):
+    REQUEST_COUNTER.inc()
     prompt = prompt or ""
     if not prompt.strip():
+        SUCCESSFUL_REQUESTS.inc()
         return "", ""
 
     if not use_local_model:
@@ -109,6 +128,7 @@ def generate_response(
                     local_trace = traceback.format_exc()
                     print("Local fallback inference failed.", flush=True)
                     print(local_trace, flush=True)
+                    FAILED_REQUESTS.inc()
                     return "", (
                         "### Inference Failed\n\n"
                         "Both the remote model and the local fallback failed.\n\n"
@@ -123,10 +143,12 @@ def generate_response(
                     f"The remote model failed with `{type(remote_exc).__name__}`, "
                     "so the request was completed by the local model.\n\n"
                 )
+                SUCCESSFUL_REQUESTS.inc()
                 return response, fallback_notice + format_inference_report(metrics)
 
             progress(1.0, desc="Remote generation completed")
             print(f"generated response: {response}")
+            SUCCESSFUL_REQUESTS.inc()
             return response, format_inference_report(metrics)
 
     progress(
@@ -147,6 +169,7 @@ def generate_response(
     except Exception as exc:
         trace = traceback.format_exc()
         print(trace, flush=True)
+        FAILED_REQUESTS.inc()
         return "", (
             f"### Inference Failed\n\n"
             f"**{type(exc).__name__}:** {exc}\n\n"
@@ -155,6 +178,7 @@ def generate_response(
 
     progress(1.0, desc="Local generation completed")
     print(f"generated response: {response}")
+    SUCCESSFUL_REQUESTS.inc()
     return response, format_inference_report(metrics)
 
 
@@ -326,6 +350,11 @@ if __name__ == "__main__":
         "true",
         "yes",
     }
+    metrics_port = int(os.getenv("PROMETHEUS_METRICS_PORT", "0"))
+
+    if metrics_port:
+        start_http_server(metrics_port, addr="0.0.0.0")
+        print(f"Prometheus metrics are available on port {metrics_port}.", flush=True)
 
     if preload_enabled:
         print("Preloading the local Hugging Face model.", flush=True)

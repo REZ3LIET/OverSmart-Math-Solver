@@ -1,0 +1,13 @@
+.env
+.env.*
+.git
+.venv
+.runtime
+**/__pycache__
+*.pyc
+bash
+Grafana
+graphify-out
+logs
+Prometheus
+tests

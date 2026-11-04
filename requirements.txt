@@ -2,5 +2,6 @@ accelerate
 gradio[oauth]
 gradio-client
 huggingface-hub
+prometheus-client
 spaces
 transformers
