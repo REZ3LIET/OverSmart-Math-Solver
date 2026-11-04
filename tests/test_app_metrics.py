@@ -16,6 +16,16 @@ def metric_value(name):
 
 
 class AppMetricsTest(unittest.TestCase):
+    def test_model_download_runs_in_background(self):
+        with patch.object(app, "download_local_model") as download, patch(
+            "builtins.print"
+        ):
+            thread = app.start_background_model_download()
+            thread.join(timeout=1)
+
+        self.assertFalse(thread.is_alive())
+        download.assert_called_once_with()
+
     def test_successful_local_request_updates_metrics(self):
         before = {
             "requests": metric_value("app_requests_total"),

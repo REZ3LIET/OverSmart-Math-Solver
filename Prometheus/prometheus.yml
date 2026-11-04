@@ -4,8 +4,8 @@ global:
 scrape_configs:
   - job_name: 'gradio_app'
     static_configs:
-      - targets: ['rcp_app:8000']  # Gradio metrics
+      - targets: ['group15_osms:8000']  # Gradio metrics
 
   - job_name: 'node_exporter_gradio'
     static_configs:
-      - targets: ['rcp_app:9100']  # Node Exporter
+      - targets: ['group15_osms:9100']  # Node Exporter

@@ -51,9 +51,11 @@ def _load_model(model_name: str = DEFAULT_MODEL_NAME):
     return model, tokenizer
 
 
-def preload_local_model():
-    """Download (if needed) and retain the local model in this process."""
-    _load_model()
+def download_local_model():
+    """Download the local fallback model without loading it into memory."""
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(DEFAULT_MODEL_NAME)
 
 
 def local_model_is_loaded():

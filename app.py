@@ -1,4 +1,5 @@
 import os
+from threading import Thread
 import traceback
 
 import gradio as gr
@@ -8,10 +9,10 @@ import uvicorn
 
 from capacity_status import capacity_message
 from model_inference import (
+    download_local_model,
     generate_api_math_representation,
     generate_math_representation,
     local_model_is_loaded,
-    preload_local_model,
 )
 
 # --- Prometheus metrics ---
@@ -340,26 +341,38 @@ if not HF_OAUTH_ENABLED:
     )
 
 
+def start_background_model_download():
+    """Warm the Hugging Face cache without delaying application startup."""
+
+    def download():
+        try:
+            print(
+                "Downloading the local fallback model in the background.",
+                flush=True,
+            )
+            download_local_model()
+            print("Local fallback model download completed.", flush=True)
+        except Exception:
+            print("Background local model download failed.", flush=True)
+            print(traceback.format_exc(), flush=True)
+
+    thread = Thread(target=download, name="local-model-download", daemon=True)
+    thread.start()
+    return thread
+
+
 if __name__ == "__main__":
     server_name = os.getenv("GRADIO_SERVER_NAME", "0.0.0.0")
     # The course infrastructure maps the LXC's Gradio port 7860 to public
     # port 8015 on the host. This is the internal listening port only.
     server_port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
-    preload_enabled = os.getenv("OSMS_PRELOAD_LOCAL_MODEL", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     metrics_port = int(os.getenv("PROMETHEUS_METRICS_PORT", "0"))
 
     if metrics_port:
         start_http_server(metrics_port, addr="0.0.0.0")
         print(f"Prometheus metrics are available on port {metrics_port}.", flush=True)
 
-    if preload_enabled:
-        print("Preloading the local Hugging Face model.", flush=True)
-        preload_local_model()
-        print("Local Hugging Face model is ready.", flush=True)
+    start_background_model_download()
 
     if standalone_app is not None:
         uvicorn.run(standalone_app, host=server_name, port=server_port)

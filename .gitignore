@@ -153,6 +153,7 @@ logs/
 .deploy-cache/
 *runtime-cache.tar
 *runtime-cache.tar.sha256
+models/
 
 # Local recovery credentials (never commit these)
 bash/*_ed25519
