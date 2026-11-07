@@ -11,8 +11,8 @@ class FakeProgress:
         pass
 
 
-def metric_value(name):
-    return REGISTRY.get_sample_value(name) or 0
+def metric_value(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0
 
 
 class AppMetricsTest(unittest.TestCase):
@@ -32,6 +32,15 @@ class AppMetricsTest(unittest.TestCase):
             "successes": metric_value("app_successful_requests_total"),
             "failures": metric_value("app_failed_requests_total"),
             "durations": metric_value("app_request_duration_seconds_count"),
+            "responses": metric_value(
+                "app_model_responses_total", {"mode": "local"}
+            ),
+            "prompt_tokens": metric_value(
+                "app_prompt_tokens_total", {"mode": "local"}
+            ),
+            "generated_tokens": metric_value(
+                "app_generated_tokens_total", {"mode": "local"}
+            ),
         }
         inference_metrics = {
             "model": "test-model",
@@ -72,6 +81,19 @@ class AppMetricsTest(unittest.TestCase):
             metric_value("app_request_duration_seconds_count"),
             before["durations"] + 1,
         )
+        self.assertEqual(
+            metric_value("app_model_responses_total", {"mode": "local"}),
+            before["responses"] + 1,
+        )
+        self.assertEqual(
+            metric_value("app_prompt_tokens_total", {"mode": "local"}),
+            before["prompt_tokens"] + 2,
+        )
+        self.assertEqual(
+            metric_value("app_generated_tokens_total", {"mode": "local"}),
+            before["generated_tokens"] + 1,
+        )
+        self.assertEqual(metric_value("app_active_requests"), 0)
 
     def test_successful_local_fallback_counts_as_success(self):
         successes_before = metric_value("app_successful_requests_total")
@@ -115,6 +137,51 @@ class AppMetricsTest(unittest.TestCase):
             metric_value("app_successful_requests_total"), successes_before + 1
         )
         self.assertEqual(metric_value("app_failed_requests_total"), failures_before)
+
+    def test_successful_remote_request_tracks_api_metrics(self):
+        responses_before = metric_value(
+            "app_model_responses_total", {"mode": "api"}
+        )
+        tokens_before = metric_value(
+            "app_generated_tokens_total", {"mode": "api"}
+        )
+        inference_metrics = {
+            "model": "test-api-model",
+            "mode": "api",
+            "response_time_s": 0.1,
+            "model_ready_time_s": 0.0,
+            "generation_time_s": 0.1,
+            "prompt_tokens": 4,
+            "generated_tokens": 2,
+            "reasoning_tokens": None,
+            "tokens_per_s": 20.0,
+            "peak_rss_mb": 10.0,
+            "gpu_peak_allocated_mb": None,
+        }
+
+        with patch.object(
+            app,
+            "generate_api_math_representation",
+            return_value=("$$2$$", inference_metrics),
+        ), patch("builtins.print"):
+            app.generate_response(
+                "1 + 1",
+                "Highschool",
+                False,
+                32,
+                0.0,
+                hf_access_token="hf_test",
+                progress=FakeProgress(),
+            )
+
+        self.assertEqual(
+            metric_value("app_model_responses_total", {"mode": "api"}),
+            responses_before + 1,
+        )
+        self.assertEqual(
+            metric_value("app_generated_tokens_total", {"mode": "api"}),
+            tokens_before + 2,
+        )
 
     def test_handled_inference_failure_updates_failure_metric(self):
         requests_before = metric_value("app_requests_total")
