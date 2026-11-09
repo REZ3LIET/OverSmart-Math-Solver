@@ -1,4 +1,5 @@
 import os
+from http import HTTPStatus
 from threading import Thread
 import traceback
 
@@ -60,6 +61,24 @@ HF_OAUTH_ENABLED = bool(os.getenv("SPACE_ID")) or os.getenv(
     "ENABLE_HF_OAUTH", ""
 ).lower() in {"1", "true", "yes"}
 SERVER_HF_TOKEN = os.getenv("HF_TOKEN")
+
+
+def format_huggingface_error(error):
+    """Return a short user-facing Hugging Face error."""
+    current = error
+    while current is not None:
+        response = getattr(current, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code is not None:
+            try:
+                reason = HTTPStatus(int(status_code)).phrase
+            except (TypeError, ValueError):
+                reason = "Request Failed"
+            return f"Hugging Face Error {status_code}: {reason}"
+        current = getattr(current, "__cause__", None)
+
+    message = str(error).splitlines()[0] if str(error) else type(error).__name__
+    return f"Hugging Face Error: {message}"
 
 
 def format_inference_report(metrics):
@@ -173,16 +192,18 @@ def generate_response(
                     return "", (
                         "### Inference Failed\n\n"
                         "Both the remote model and the local fallback failed.\n\n"
-                        f"- **Remote:** {type(remote_exc).__name__}: {remote_exc}\n"
+                        f"- **Remote:** {format_huggingface_error(remote_exc)}\n"
                         f"- **Local:** {type(local_exc).__name__}: {local_exc}"
                     )
 
                 progress(1.0, desc="Local fallback completed")
                 print(f"generated local fallback response: {response}")
                 fallback_notice = (
+                    "### Hugging Face Error\n\n"
+                    f"> **{format_huggingface_error(remote_exc)}**\n\n"
                     "### Local Fallback Used\n\n"
-                    f"The remote model failed with `{type(remote_exc).__name__}`, "
-                    "so the request was completed by the local model.\n\n"
+                    "The remote request failed, so the request was completed by "
+                    "the local model.\n\n"
                 )
                 record_inference_success(metrics)
                 return response, fallback_notice + format_inference_report(metrics)

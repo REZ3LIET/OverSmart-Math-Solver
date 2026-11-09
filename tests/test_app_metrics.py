@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from prometheus_client import REGISTRY
@@ -112,10 +113,13 @@ class AppMetricsTest(unittest.TestCase):
             "gpu_peak_allocated_mb": None,
         }
 
+        remote_error = RuntimeError("provider request failed")
+        remote_error.response = SimpleNamespace(status_code=402)
+
         with patch.object(
             app,
             "generate_api_math_representation",
-            side_effect=RuntimeError("remote unavailable"),
+            side_effect=remote_error,
         ), patch.object(
             app,
             "generate_math_representation",
@@ -132,6 +136,7 @@ class AppMetricsTest(unittest.TestCase):
             )
 
         self.assertEqual(response, "$$2$$")
+        self.assertIn("Hugging Face Error 402: Payment Required", report)
         self.assertIn("Local Fallback Used", report)
         self.assertEqual(
             metric_value("app_successful_requests_total"), successes_before + 1
