@@ -149,16 +149,6 @@ activemq-data/
 
 # Environments
 .env
-logs/
-.deploy-cache/
-*runtime-cache.tar
-*runtime-cache.tar.sha256
-models/
-
-# Local recovery credentials (never commit these)
-bash/*_ed25519
-bash/*_ed25519.pub
-bash/*_ed25519.password
 .envrc
 .venv
 env/

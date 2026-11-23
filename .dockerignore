@@ -5,11 +5,6 @@
 .runtime
 **/__pycache__
 *.pyc
-bash
-Grafana
 graphify-out
-logs
-models
 Ngrok
-Prometheus
 tests
