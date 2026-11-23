@@ -12,8 +12,11 @@ Create the local environment file and add your Gemini API key:
 
 ```bash
 cp .env.example .env
-# Edit .env and replace GEMINI_API_KEY with the real key.
+# Edit .env and replace GEMINI_API_KEY with the real key. Do not quote it.
 ```
+
+Use `GEMINI_API_KEY=value`, not `GEMINI_API_KEY='value'`; Docker's
+`--env-file` passes quote characters as part of the value.
 
 For a direct local run, export the values from `.env` into your shell first:
 

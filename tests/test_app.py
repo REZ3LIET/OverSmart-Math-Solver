@@ -53,7 +53,10 @@ class FakeModels:
 
 class AppTest(unittest.TestCase):
     def test_client_uses_api_key(self):
-        self.assertEqual(client_kwargs["api_key"], "test-key")
+        self.assertEqual(
+            client_kwargs,
+            {"enterprise": True, "api_key": "test-key"},
+        )
 
     def test_generate_response_uses_gemini_model(self):
         models = FakeModels(response="$$2$$")
