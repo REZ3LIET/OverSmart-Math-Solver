@@ -4,8 +4,6 @@ OSMS: OverSmart Math Solver
 
 *Codes are generated with help from Codex and designed by REZ3LIET.*
 
-Demo: [world-level](https://boxer-buffoon-unpiloted.ngrok-free.dev/)
-
 ## Model execution
 
 The application calls `gemini-3.5-flash` through the Gemini Developer API.
@@ -34,10 +32,10 @@ The Gradio application listens on port `7860` by default.
 
 ## Docker deployment
 
-Create a shared network for the application and ngrok containers:
+Build the application image:
 
 ```bash
-docker network create osms
+docker build -t rez3liet/osms .
 ```
 
 Run the application using the variables in `.env`:
@@ -46,32 +44,15 @@ Run the application using the variables in `.env`:
 docker run -d \
   --name group15_osms \
   --restart unless-stopped \
-  --network osms \
   -p 3131:7860 \
   --env-file .env \
   rez3liet/osms
 ```
 
+Open `http://localhost:3131` when Docker runs locally. In AWS, Azure, or GCP,
+configure the platform's public ingress or load balancer to target container
+port `7860`.
+
 The `.env` file is read by Docker at startup and is not copied into the image.
 For a shared deployment, inject `GEMINI_API_KEY` from the cloud platform's
 secret manager instead of uploading `.env`.
-
-Run ngrok on the same network:
-
-```bash
-docker run -d \
-  --name group15_osms_ngrok \
-  --restart unless-stopped \
-  --network osms \
-  -e NGROK_AUTHTOKEN='<ngrok-auth-token>' \
-  rez3liet/osms_ngrok \
-  http://group15_osms:7860 \
-  --url https://boxer-buffoon-unpiloted.ngrok-free.dev \
-  --log stdout
-```
-
-Inspect the public-tunnel logs with:
-
-```bash
-docker logs group15_osms_ngrok
-```
