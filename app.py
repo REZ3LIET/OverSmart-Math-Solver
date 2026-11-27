@@ -1,4 +1,5 @@
 import os
+import re
 
 import gradio as gr
 from google import genai
@@ -6,7 +7,7 @@ from google.genai import types
 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL = "gemini-3.8-flash"
 
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is required")
@@ -19,6 +20,42 @@ LEVEL_INSTRUCTIONS = {
     "Masters": "Use advanced calculus or partial differential equations.",
     "PhD": "Use advanced mathematical machinery when appropriate.",
 }
+
+
+def format_latex(text):
+    expression = text.strip()
+    lines = expression.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    expression = "\n".join(lines).strip()
+
+    for pattern in (r"\$\$(.*?)\$\$", r"\\\[(.*?)\\\]", r"\\\((.*?)\\\)"):
+        matches = re.findall(pattern, expression, flags=re.DOTALL)
+        if matches:
+            expression = matches[-1].strip()
+            break
+
+    boxed_prefix = r"\boxed{"
+    if expression.startswith(boxed_prefix):
+        boxed_expression = expression[len(boxed_prefix) :]
+        depth = 1
+        for index, character in enumerate(boxed_expression):
+            if character == "{" and (index == 0 or boxed_expression[index - 1] != "\\"):
+                depth += 1
+            elif character == "}" and (
+                index == 0 or boxed_expression[index - 1] != "\\"
+            ):
+                depth -= 1
+                if depth == 0:
+                    boxed_expression = boxed_expression[:index]
+                    break
+        expression = boxed_expression
+
+    expression = rf"\boxed{{{expression}}}"
+
+    return f"$$\n{expression}\n$$"
 
 
 def generate_response(prompt, generation_level, max_output_tokens):
@@ -38,11 +75,12 @@ def generate_response(prompt, generation_level, max_output_tokens):
                 system_instruction=(
                     "You are OverSmart Math Solver. Rewrite the user's input as an "
                     "equivalent, more sophisticated mathematical expression. "
-                    f"{level_instruction} Return only the final expression in LaTeX "
-                    "display-math format."
+                    f"{level_instruction} Return only the final expression without reasoning in LaTeX "
+                    "as: $$\\boxed{...}$$. \nDo not include prose, code fences, or "
+                    "multiple alternatives."
                 ),
                 thinking_config=types.ThinkingConfig(
-                    thinking_level=types.ThinkingLevel.LOW,
+                    thinking_level=types.ThinkingLevel.MEDIUM,
                 ),
                 max_output_tokens=int(max_output_tokens),
             ),
@@ -51,7 +89,10 @@ def generate_response(prompt, generation_level, max_output_tokens):
         message = str(error).splitlines()[0] if str(error) else type(error).__name__
         return f"### Gemini API Error\n\n{message}"
 
-    return response.text or "The model returned no text."
+    if not response.text:
+        return "The model returned no text."
+    print(response.text)
+    return format_latex(response.text)
 
 
 EXAMPLE_PROMPTS = [
@@ -82,9 +123,9 @@ with gr.Blocks(title="OSMS") as demo:
             label="Output Level",
         )
         max_output_tokens = gr.Slider(
-            minimum=32,
-            maximum=1024,
-            value=256,
+            minimum=1024,
+            maximum=1024*2,
+            value=1024,
             step=32,
             label="Maximum Output Tokens",
         )

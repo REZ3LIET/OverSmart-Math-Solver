@@ -64,7 +64,7 @@ class AppTest(unittest.TestCase):
 
         response = app.generate_response("1 + 1", "Highschool", 128)
 
-        self.assertEqual(response, "$$2$$")
+        self.assertEqual(response, "$$\n\\boxed{2}\n$$")
         self.assertEqual(models.calls[0]["model"], app.GEMINI_MODEL)
         self.assertEqual(models.calls[0]["contents"], "1 + 1")
         self.assertEqual(models.calls[0]["config"].max_output_tokens, 128)
@@ -72,6 +72,28 @@ class AppTest(unittest.TestCase):
             "high-school mathematics",
             models.calls[0]["config"].system_instruction,
         )
+
+    def test_format_latex_removes_code_fence_and_normalizes_delimiters(self):
+        response = app.format_latex(
+            "```latex\n$$ \\boxed{\\int_0^x 6t \\, dt} $$\n```"
+        )
+
+        self.assertEqual(response, "$$\n\\boxed{\\int_0^x 6t \\, dt}\n$$")
+
+    def test_format_latex_selects_final_complete_expression(self):
+        response = app.format_latex(
+            "$$ \\lim_{h \\to 0} f(h) $$\nNo. How about:\n$$ 3x^2 $$"
+        )
+
+        self.assertEqual(response, "$$\n\\boxed{3x^2}\n$$")
+
+    def test_format_latex_adds_missing_box(self):
+        self.assertEqual(app.format_latex(r"\[3x^2\]"), "$$\n\\boxed{3x^2}\n$$")
+
+    def test_format_latex_repairs_unclosed_box(self):
+        response = app.format_latex(r"$$\boxed{\lim_{\epsilon\to}$$")
+
+        self.assertEqual(response, "$$\n\\boxed{\\lim_{\\epsilon\\to}}\n$$")
 
     def test_generate_response_reports_gemini_api_error(self):
         app.client = SimpleNamespace(

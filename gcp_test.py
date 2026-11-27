@@ -11,13 +11,18 @@ if not api_key:
 client = genai.Client(enterprise=True, api_key=api_key)
 response = client.models.generate_content(
     model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
-    contents="Who let the dogs out?",
+    contents="d/dx x^3",
     config=types.GenerateContentConfig(
-        system_instruction="Speak in animal tongue.",
+        system_instruction=(
+            "You are OverSmart Math Solver. Rewrite the user's input as an "
+            "equivalent, more sophisticated mathematical expression. "
+            "Use basic algebra and high-school mathematics. Return only the final expression in LaTeX $$\\boxed{}$$"
+            "display-math format."
+        ),
         thinking_config=types.ThinkingConfig(
-            thinking_level=types.ThinkingLevel.LOW,
+            thinking_level=types.ThinkingLevel.MEDIUM,
         ),
         max_output_tokens=1024,
     ),
 )
-print(response.text, end="")
+print(response.text)
